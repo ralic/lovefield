@@ -1,0 +1,48 @@
+<link rel="import" href="https://www.polymer-project.org/components/polymer/polymer.html">
+
+<!-- <link rel="import" href="https://www.polymer-project.org/components/core-xhr/core-xhr.html"> -->
+
+<script src="lib/lovefield.min.js"></script>
+<script src="lib/olympia_db_gen.js"></script>
+
+<polymer-element name="olympia-query" attributes="results">
+<script>
+(function() {
+
+  var db;
+
+  function checkForExistingData_() {
+    var medal = db.getSchema().getMedal();
+    return db.select().from(medal).exec().then(
+      function(rows) {
+        return rows.length > 0;
+      });
+  };
+
+  function insertData_() {
+    var medal = db.getSchema().getMedal();
+    return $http.get('data/olympic_medalists.json').then(
+        function(response) {
+          var rows = response.data.map(function(obj) {
+            return medal.createRow(obj);
+          });
+          return db.insert().into(medal).values(rows).exec();
+        });
+  };
+
+  function init_() {
+    return olympia.db.getInstance().then((function(database) {
+      db = database;
+      window.db = database;
+      return this.checkForExistingData_();
+    }).bind(this)).then((function(dataExist) {
+      return dataExist ? Promise.resolve() : this.insertData_();
+    }).bind(this));
+  }
+
+  Polymer('olympia-query', {
+  });
+
+})();
+</script>
+</polymer-element>
