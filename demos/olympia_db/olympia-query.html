@@ -46,15 +46,76 @@
 
   Polymer('olympia-query', {
     initialized: false,
-    create: function() {
+    publish: {
+      limit: 100,
+      cities: null,
+      fromYear: null,
+      toYear: null,
+      countries: null,
+      disciplines: null,
+      events: null,
+      genders: null,
+      colors: null
+    },
+    created: function() {
       if (!db) {
         init_().then(function() {
           this.initialized = true;
         }.bind(this));
       }
     },
-    initializedChanged: function() {
-      console.log(db);
+    getQuery: function() {
+      var medal = db.getSchema().getMedal();
+      var predicates = [];
+
+      if (this.countries) {
+       predicates.push(medal.country.eq(this.countries));
+      }
+
+      if (this.colors) {
+       predicates.push(medal.color.eq(this.colors));
+      }
+
+      if (this.cities) {
+       predicates.push(medal.city.eq(this.cities));
+      }
+
+      if (this.genders) {
+       predicates.push(medal.gender.eq(this.genders));
+      }
+
+      if (this.disciplines) {
+       predicates.push(medal.discipline.eq(this.disciplines));
+      }
+
+      if (this.events) {
+       predicates.push(medal.event.eq(this.events));
+      }
+
+      if (this.fromYear &&
+         this.toYear) {
+       var minYear = Math.min(
+           this.fromYear, this.toYear);
+       var maxYear = Math.max(
+           this.fromYear, this.toYear);
+       predicates.push(medal.year.between(minYear, maxYear));
+      } else if (this.fromYear) {
+       predicates.push(medal.year.gte(this.fromYear));
+      } else if (this.toYear) {
+       predicates.push(medal.year.lte(this.toYear));
+      }
+
+      var composite = predicates.length > 0 ?
+         lf.op.and.apply(null, predicates) :
+         null;
+
+      return db.select().from(medal).limit(this.limit).where(composite);
+    },
+
+    search: function() {
+      this.getQuery().exec().then(function(results) {
+        this.results = results;
+      }.bind(this));
     }
   });
 
