@@ -1,6 +1,5 @@
 <link rel="import" href="https://www.polymer-project.org/components/polymer/polymer.html">
 
-<!-- <link rel="import" href="https://www.polymer-project.org/components/core-xhr/core-xhr.html"> -->
 
 <script src="lib/lovefield.min.js"></script>
 <script src="lib/olympia_db_gen.js"></script>
@@ -17,30 +16,46 @@
       function(rows) {
         return rows.length > 0;
       });
-  };
+  }
 
   function insertData_() {
     var medal = db.getSchema().getMedal();
-    return $http.get('data/olympic_medalists.json').then(
-        function(response) {
-          var rows = response.data.map(function(obj) {
-            return medal.createRow(obj);
-          });
-          return db.insert().into(medal).values(rows).exec();
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', 'data/olympic_medalists.json');
+    xhr.send();
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState == 4) {
+        var response = JSON.parse(xhr.responseText);
+        var rows = response.map(function(obj) {
+          return medal.createRow(obj);
         });
-  };
+        return db.insert().into(medal).values(rows).exec();
+      }
+    }.bind(this);
+  }
 
   function init_() {
     return olympia.db.getInstance().then((function(database) {
       db = database;
       window.db = database;
-      return this.checkForExistingData_();
-    }).bind(this)).then((function(dataExist) {
-      return dataExist ? Promise.resolve() : this.insertData_();
-    }).bind(this));
+      return checkForExistingData_();
+    })).then((function(dataExist) {
+      return dataExist ? Promise.resolve() : insertData_();
+    }));
   }
 
   Polymer('olympia-query', {
+    initialized: false,
+    create: function() {
+      if (!db) {
+        init_().then(function() {
+          this.initialized = true;
+        }.bind(this));
+      }
+    },
+    initializedChanged: function() {
+      console.log(db);
+    }
   });
 
 })();
