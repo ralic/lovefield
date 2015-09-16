@@ -156,32 +156,67 @@ function getTestUrls(testFolder, testPrefix) {
 
 
 /**
+ * Returns a web driver that connects to Sauce Labs instance via secure tunnel.
+ * @param {string} browser
+ * @return {!WebDriverCapabilities}
+ */
+function getSauceDriver(browser) {
+  var caps = /** @type {!WebDriverCapabilities} */ (
+      new webdriver.Capabilities());
+
+  caps.set('browserName', browser);
+  caps.set('name', 'Travis Job ' + process.env['TRAVIS_JOB_NUMBER']);
+  caps.set('username', process.env['SAUCE_USERNAME']);
+  caps.set('accessKey', process.env['SAUCE_ACCESS_KEY']);
+  caps.set('tunnel-identifier', process.env['TRAVIS_JOB_NUMBER']);
+
+  switch (browser) {
+    case 'chrome':
+      caps['platform'] = 'linux';
+      break;
+
+    case 'firefox':
+      caps['platform'] = 'linux';
+      break;
+
+    case 'ie':
+      caps['platform'] = 'Windows 7';
+      caps['version'] = '11.0';
+      break;
+
+    case 'safari':
+      caps['platform'] = 'OS X 10.10';
+      caps['version'] = '8.0';
+      break;
+
+    default:
+      throw new Error('Unknown browser: ' + browser);
+  }
+
+  var builder = /** @type {!WebDriverBuilder} */ (new webdriver.Builder());
+  return builder.
+      usingServer('http://' + process.env['SAUCE_USERNAME'] + ':' +
+          process.env['SAUCE_ACCESS_KEY'] +
+          '@ondemand.saucelabs.com:80/wd/hub').
+      withCapabilities(caps).
+      build();
+}
+
+
+/**
  * @param {string} browser
  * @return {!WebDriver}
  */
 function getWebDriver(browser) {
-  var capabilities = /** @type {!WebDriverCapabilities} */ (
-      new webdriver.Capabilities());
-  capabilities.set('browserName', browser);
-
-  var usingServer = false;
-
-  // Add Sauce credentials if they were set in the environment.
   if (process.env['SAUCE_USERNAME']) {
-    usingServer = true;
-    capabilities.set('name', 'Travis Job ' + process.env['TRAVIS_JOB_NUMBER']);
-    capabilities.set('username', process.env['SAUCE_USERNAME']);
-    capabilities.set('accessKey', process.env['SAUCE_ACCESS_KEY']);
-    capabilities.set('tunnel-identifier', process.env['TRAVIS_JOB_NUMBER']);
+    return getSauceDriver(browser);
   }
+
+  var caps = /** @type {!WebDriverCapabilities} */ (
+      new webdriver.Capabilities());
+  caps.set('browserName', browser);
 
   var builder = /** @type {!WebDriverBuilder} */ (new webdriver.Builder());
-  if (usingServer) {
-    builder.usingServer('http://' +
-        process.env['SAUCE_USERNAME'] + ':' + process.env['SAUCE_ACCESS_KEY'] +
-        '@ondemand.saucelabs.com:80/wd/hub');
-  }
-
   if (browser == 'chrome') {
     var chromeOptions = /** @type {!ChromeOptions} */ (
         new chromeMod.Options());
@@ -190,14 +225,14 @@ function getWebDriver(browser) {
       '--no-first-run'
     ]);
 
-    return builder.withCapabilities(capabilities).
+    return builder.withCapabilities(caps).
         setChromeOptions(chromeOptions).
         build();
   } else if (browser == 'firefox') {
     var firefoxOptions = /** @type {!FirefoxOptions} */ (
         new firefoxMod.Options());
     firefoxOptions.setProfile(new firefoxMod.Profile());
-    return builder.withCapabilities(capabilities).
+    return builder.withCapabilities(caps).
         setFirefoxOptions(firefoxOptions).
         build();
   } else if (browser == 'safari') {
@@ -207,19 +242,13 @@ function getWebDriver(browser) {
     }
     var safariOptions = /** @type {!SafariOptions} */ (new safariMod.Options());
     safariOptions.setCleanSession();
-    return builder.withCapabilities(capabilities).
+    return builder.withCapabilities(caps).
         setSafariOptions(safariOptions).
         build();
   } else if (browser == 'ie') {
-    if (usingServer) {
-      capabilities['browserName'] = 'internet explorer';
-      capabilities['platform'] = 'Windows 7';
-      capabilities['version'] = '11.0';
-    }
-    console.log(capabilities['browserName']);
     var ieOptions = /** @type {!IeOptions} */ (new ieMod.Options());
     ieOptions.ensureCleanSession();
-    return builder.withCapabilities(capabilities).
+    return builder.withCapabilities(caps).
         setIeOptions(ieOptions).
         build();
   } else {
