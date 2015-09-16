@@ -20,7 +20,7 @@ before_script:
 script:
   - gulp build --target=lib --mode=opt
   - gulp test --target=spac
-  - [ "${TRAVIS_PULL_REQUEST}" = "false" ] && gulp test --target=tests --browser=ie --browser=safari || false
+  - if [ "$TRAVIS_PULL_REQUEST" == "false" ]; then gulp test --target=tests --browser=ie --browser=safari; fi
     #  - gulp build --target=tests
 
 notifications:
