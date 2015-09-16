@@ -20,7 +20,7 @@ before_script:
 script:
   - gulp build --target=lib --mode=opt
   - gulp test --target=spac
-  - gulp test --target=tests --browser=chrome --browser=ie
+  - gulp test --target=tests --browser=ie
     #  - gulp build --target=tests
 
 notifications:
