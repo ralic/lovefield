@@ -210,6 +210,11 @@ function getWebDriver(browser) {
         setSafariOptions(safariOptions).
         build();
   } else if (browser == 'ie') {
+    if (usingServer) {
+      capabilities['browserName'] = 'internet explorer';
+      capabilities['platform'] = 'Windows 7';
+      capabilities['version'] = '11.0';
+    }
     var ieOptions = /** @type {!IeOptions} */ (new ieMod.Options());
     ieOptions.ensureCleanSession();
     return builder.withCapabilities(capabilities).
