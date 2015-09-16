@@ -20,8 +20,8 @@ before_script:
 script:
   - gulp build --target=lib --mode=opt
   - gulp test --target=spac
-  - gulp test --target=tests --browser=chrome
-  - gulp build --target=tests
+  - gulp test --target=tests --browser=chrome --browser=ie
+    #  - gulp build --target=tests
 
 notifications:
   email: false

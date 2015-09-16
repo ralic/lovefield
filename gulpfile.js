@@ -113,17 +113,22 @@ gulp.task('debug', function() {
 
 gulp.task('test', ['debug'], function() {
   var knownOpts = {
-    'browser': [String, null],
+    'browser': [String, Array, null],
     'filter': [String, null],
     'target': [String]
   };
   var options = nopt(knownOpts);
-  options.browser = options.browser || 'chrome';
+  var browsers;
+  if (options.browser instanceof Array) {
+    browsers = options.browser;
+  } else {
+    browsers = [options.browser || 'chrome'];
+  }
 
   var whenTestsDone = null;
   if (options.target == 'perf') {
     // Run only perf regression tests and dump output in the console.
-    whenTestsDone = runner.runJsPerfTests(options.browser).then(
+    whenTestsDone = runner.runJsPerfTests(browsers[0]).then(
         function(perfData) {
           log(JSON.stringify(perfData, null, 2));
           testServer.stopServer();
@@ -133,19 +138,31 @@ gulp.task('test', ['debug'], function() {
     // Run only SPAC.
     whenTestsDone = runner.runSpacTests();
   } else {
-    // Run only JSUnit tests.
-    whenTestsDone =
-        runner.runJsUnitTests(options.filter, options.browser).then(
-            function(results) {
-              var failedCount = results.reduce(function(prev, item) {
-                return prev + (item['pass'] ? 0 : 1);
-              }, 0);
-              log(results.length + ' tests, ' + failedCount + ' failure(s).');
-              log('JSUnit tests: ', failedCount > 0 ? chalk.red('FAILED') :
-                  chalk.green('PASSED'));
-              testServer.stopServer();
-              process.exit();
-            });
+    var testBrowser = function(browser) {
+      return runner.runJsUnitTests(options.filter, browser).then(
+          function(results) {
+            var failedCount = results.reduce(function(prev, item) {
+              return prev + (item['pass'] ? 0 : 1);
+            }, 0);
+            log(results.length + ' tests, ' + failedCount + ' failure(s).');
+            log('[ ' + chalk.cyan(browser) + ' ] JSUnit tests: ',
+                failedCount > 0 ? chalk.red('FAILED') : chalk.green('PASSED'));
+            if (failedCount > 0) {
+              throw new Error();
+            }
+          });
+    };
+    var runTest = function() {
+      return new Promise(function(resolve, reject) {
+        if (browsers.length) {
+          return testBrowser(browsers.shift()).then(runTest, reject);
+        } else {
+          testServer.stopServer();
+          process.exit();
+        }
+      });
+    };
+    whenTestsDone = runTest();
   }
   return whenTestsDone;
 });
