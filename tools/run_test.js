@@ -216,7 +216,7 @@ function getWebDriver(browser) {
       capabilities['platform'] = 'Windows 7';
       capabilities['version'] = '11.0';
     }
-    console.log('capabilities');
+    console.log(capabilities['browserName']);
     var ieOptions = /** @type {!IeOptions} */ (new ieMod.Options());
     ieOptions.ensureCleanSession();
     return builder.withCapabilities(capabilities).
