@@ -18,11 +18,14 @@ goog.provide('lf.testing.util');
 
 goog.require('goog.Promise');
 goog.require('lf.TransactionType');
-goog.require('lf.cache.Journal');
+goog.require('lf.backstore.TableType');
 goog.require('lf.service');
-goog.require('lf.structs.set');
 
 goog.forwardDeclare('goog.testing.PropertyReplacer');
+goog.forwardDeclare('lf.Global');
+goog.forwardDeclare('lf.Row');
+goog.forwardDeclare('lf.index.Stats');
+goog.forwardDeclare('lf.schema.Index');
 
 
 /**
@@ -98,12 +101,11 @@ lf.testing.util.assertThrowsErrorAsync = function(exceptionCode, fn) {
 lf.testing.util.selectAll = function(global, tableSchema) {
   var backStore = global.getService(lf.service.BACK_STORE);
 
-  var tx = backStore.createTx(
-      lf.TransactionType.READ_ONLY,
-      new lf.cache.Journal(global, lf.structs.set.create([tableSchema])));
+  var tx = backStore.createTx(lf.TransactionType.READ_ONLY, [tableSchema]);
   var table = tx.getTable(
       tableSchema.getName(),
-      tableSchema.deserializeRow.bind(tableSchema));
+      tableSchema.deserializeRow.bind(tableSchema),
+      lf.backstore.TableType.DATA);
   return table.get([]);
 };
 
@@ -120,4 +122,19 @@ lf.testing.util.simulateIndexCost = function(
   var index = indexStore.get(indexSchema.getNormalizedName());
   propertyReplacer.replace(
       index, 'cost', function() { return cost; });
+};
+
+
+/**
+ * Instruments the return value of lf.index.Index#stats().
+ * @param {!goog.testing.PropertyReplacer} propertyReplacer
+ * @param {!lf.index.IndexStore} indexStore
+ * @param {string} indexName
+ * @param {!lf.index.Stats} indexStats The stats to be used.
+ */
+lf.testing.util.simulateIndexStats = function(
+    propertyReplacer, indexStore, indexName, indexStats) {
+  var index = indexStore.get(indexName);
+  propertyReplacer.replace(
+      index, 'stats', function() { return indexStats; });
 };

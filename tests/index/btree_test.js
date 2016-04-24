@@ -21,6 +21,7 @@ goog.require('goog.testing.jsunit');
 goog.require('lf.Order');
 goog.require('lf.index.BTree');
 goog.require('lf.index.MultiKeyComparator');
+goog.require('lf.index.MultiKeyComparatorWithNull');
 goog.require('lf.index.SimpleComparator');
 goog.require('lf.index.SingleKeyRange');
 goog.require('lf.structs.set');
@@ -977,6 +978,57 @@ function testGetRange_Numeric() {
   assertEquals(0, results.length);
 }
 
+function testGetRange_LimitSkip() {
+  var tree = new lf.index.BTree('test', c, true);
+  for (var i = -10; i <= 10; ++i) {
+    tree.set(i, i);
+  }
+
+  var results = tree.getRange();
+  var results2 = tree.getRange([lf.index.SingleKeyRange.all()]);
+  assertEquals(21, results.length);
+  assertArrayEquals(results, results2);
+  results2 = tree.getRange(undefined, /* reverse */ true);
+  assertArrayEquals(results, results2.reverse());
+  results2 = tree.getRange(undefined, false, /* limit */ 5, /* skip */ 10);
+  assertArrayEquals([0, 1, 2, 3, 4], results2);
+  results2 = tree.getRange(undefined, true, 3, 5);
+  assertArrayEquals([5, 4, 3], results2);
+  results2 = tree.getRange(undefined, false, 3);
+  assertArrayEquals([-10, -9, -8], results2);
+  results2 = tree.getRange(undefined, true, 3);
+  assertArrayEquals([10, 9, 8], results2);
+  results2 = tree.getRange(undefined, false, undefined, 17);
+  assertArrayEquals([7, 8, 9, 10], results2);
+  results2 = tree.getRange(undefined, true, undefined, 18);
+  assertArrayEquals([-8, -9, -10], results2);
+  results2 = tree.getRange(undefined, false, undefined, 22);
+  assertArrayEquals([], results2);
+  results2 = tree.getRange(undefined, true, undefined, 22);
+  assertArrayEquals([], results2);
+
+  var keyRange = [lf.index.SingleKeyRange.lowerBound(1)];
+  results = tree.getRange(keyRange, true);
+  assertEquals(10, results.length);
+  assertEquals(10, results[0]);
+  assertEquals(1, results[9]);
+
+  results = tree.getRange(keyRange, false, 4, 4);
+  assertArrayEquals([5, 6, 7, 8], results);
+  results = tree.getRange(keyRange, false, 4);
+  assertArrayEquals([1, 2, 3, 4], results);
+  results = tree.getRange(keyRange, true, 4);
+  assertArrayEquals([10, 9, 8, 7], results);
+  results = tree.getRange(keyRange, false, undefined, 18);
+  assertArrayEquals([], results);
+  results = tree.getRange(keyRange, false, undefined, 8);
+  assertArrayEquals([9, 10], results);
+  results = tree.getRange(keyRange, true, undefined, 8);
+  assertArrayEquals([2, 1], results);
+  results = tree.getRange(keyRange, true, 2, 8);
+  assertArrayEquals([2, 1], results);
+}
+
 function testGetRange_EmptyTree() {
   var tree = new lf.index.BTree(
       'test',
@@ -1204,6 +1256,20 @@ function testMultiKeyGetRangeRegression() {
   ]];
   assertArrayEquals([9], tree.getRange(keyRange2));
 
+  var keyRange3 = [[
+    lf.index.SingleKeyRange.lowerBound('P'),
+    lf.index.SingleKeyRange.upperBound('D')
+  ]];
+  assertArrayEquals([10, 11, 12, 13], tree.getRange(keyRange3));
+  assertArrayEquals([11, 12], tree.getRange(keyRange3, false, 2, 1));
+  assertArrayEquals([12, 11, 10], tree.getRange(keyRange3, true, 3, 1));
+
+  var keyRange4 = [[
+    lf.index.SingleKeyRange.lowerBound('S'),
+    lf.index.SingleKeyRange.all()
+  ]];
+  assertArrayEquals([10, 11, 12, 13], tree.getRange(keyRange4));
+
   assertArrayEquals(
       [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
       tree.getRange());
@@ -1219,56 +1285,99 @@ function testMultiKeyGetRangeRegression() {
   assertArrayEquals(
       [3, 2, 1, 0, 6, 5, 4, 9, 8, 7, 13, 12, 11, 10],
       tree2.getRange());
+  assertArrayEquals(
+      [1, 0, 6],
+      tree2.getRange(undefined, false, 3, 2));
+  assertArrayEquals(
+      [13, 7, 8, 9],
+      tree2.getRange(undefined, true, 4, 3));
 }
 
-function testStats() {
+
+/**
+ * Tests the stats of a unique tree (each key has only one associated value).
+ */
+function testStats_UniqueTree() {
   var tree = insertToTree(23, false);
-  assertEquals(23, tree.stats().totalRows);
+  var expectedMaxKeyEncountered = Math.max.apply(null, SEQUENCE);
+
+  var stats = tree.stats();
+  assertEquals(23, stats.totalRows);
+  assertEquals(expectedMaxKeyEncountered, stats.maxKeyEncountered);
+
+  // Testing deletions.
   tree.remove(9);
   tree.remove(17);
   tree.remove(21);
-  assertEquals(20, tree.stats().totalRows);
+  assertEquals(20, stats.totalRows);
+
+  // Testing additions.
   tree.add(9, 9);
   tree.add(21, 21);
-  assertEquals(22, tree.stats().totalRows);
+  assertEquals(22, stats.totalRows);
+
+  // Testing replacements.
   tree.set(9, 8);
-  assertEquals(22, tree.stats().totalRows);
+  assertEquals(22, stats.totalRows);
+
+  // Testing stats.maxKeyEncountered.
   tree.set(999, 888);
-  assertEquals(23, tree.stats().totalRows);
+  assertEquals(23, stats.totalRows);
+  expectedMaxKeyEncountered = 999;
+  assertEquals(expectedMaxKeyEncountered, stats.maxKeyEncountered);
+
+  // Testing removing everything from the index.
   tree.clear();
-  assertEquals(0, tree.stats().totalRows);
+  assertEquals(0, stats.totalRows);
+  assertEquals(expectedMaxKeyEncountered, stats.maxKeyEncountered);
+
   for (var i = 0; i < 23; ++i) {
     tree.set(i, i);
   }
   assertEquals(23, tree.stats().totalRows);
 
-  // Non-unique tree, each key has two rows.
-  tree = insertToTree(23, true);
-  assertEquals(46, tree.stats().totalRows);
+  // Test stats after serialization/deserialization.
+  var rows = insertToTree(23, false).serialize();
+  var deserializedTree = lf.index.BTree.deserialize(c, 'dummyTree', true, rows);
+  assertEquals(23, deserializedTree.stats().totalRows);
+}
+
+
+/**
+ * Tests the stats of a non-unique tree where each key has two associated
+ * values.
+ */
+function testStats_NonUniqueTree() {
+  var tree = insertToTree(23, true);
+  var expectedMaxKeyEncountered = Math.max.apply(null, SEQUENCE);
+
+  var stats = tree.stats();
+  assertEquals(46, stats.totalRows);
+  assertEquals(expectedMaxKeyEncountered, stats.maxKeyEncountered);
   // Remove all rows for the given key.
   tree.remove(21);
-  assertEquals(44, tree.stats().totalRows);
+  assertEquals(44, stats.totalRows);
   // Remove only one row for the given key.
   tree.remove(17, 17);
-  assertEquals(43, tree.stats().totalRows);
+  assertEquals(43, stats.totalRows);
   tree.remove(17, 9999);  // remove non-existing row
-  assertEquals(43, tree.stats().totalRows);
+  assertEquals(43, stats.totalRows);
   tree.set(17, 7777);
   tree.add(17, 8888);
   tree.add(17, 9999);
-  assertEquals(45, tree.stats().totalRows);
+  assertEquals(45, stats.totalRows);
   tree.add(9, 889);
-  assertEquals(46, tree.stats().totalRows);
+  assertEquals(46, stats.totalRows);
   tree.remove(9);
-  assertEquals(43, tree.stats().totalRows);
+  assertEquals(43, stats.totalRows);
+  assertEquals(expectedMaxKeyEncountered, stats.maxKeyEncountered);
 
   var rows = tree.serialize();
-  var tree2 = lf.index.BTree.deserialize(c, 't2', false, rows);
-  assertEquals(43, tree2.stats().totalRows);
-
-  rows = insertToTree(23, false).serialize();
-  var tree3 = lf.index.BTree.deserialize(c, 't3', true, rows);
-  assertEquals(23, tree3.stats().totalRows);
+  var deserializedTree =
+      lf.index.BTree.deserialize(c, 'dummyTree', false, rows);
+  assertEquals(43, deserializedTree.stats().totalRows);
+  assertEquals(
+      expectedMaxKeyEncountered, deserializedTree.stats().maxKeyEncountered);
 }
 
 function testGetAll() {
@@ -1295,4 +1404,130 @@ function testGetAll() {
   assertArrayEquals([14, 20, 21], tree2.getRange(undefined, false, 3, 4));
   assertArrayEquals([94], tree2.getRange(undefined, false, 10, 44));
   assertArrayEquals([], tree2.getRange(undefined, false, undefined, 99));
+}
+
+function testSmoke_MultiNullableKey() {
+  var comparator = new lf.index.MultiKeyComparatorWithNull(
+      lf.index.MultiKeyComparator.createOrders(2, lf.Order.ASC));
+  var tree = insertToTree2(23, comparator);
+  assertArrayEquals([1, '1'], tree.min()[0]);
+  assertArrayEquals([49, '49'], tree.max()[0]);
+
+  tree.set([-1, null], 9996);
+  tree.set([null, '33'], 9997);
+  tree.set([777, null], 9998);
+  tree.set([null, null], 9999);
+  assertEquals(SEQUENCE2.length + 4, tree.getRange().length);
+
+  assertArrayEquals([-1, null], tree.min()[0]);
+  assertArrayEquals([777, null], tree.max()[0]);
+
+  // Serialize and deserialize should have no problem.
+  var rows = tree.serialize();
+  var tree2 = deserializeTree(rows);
+  assertArrayEquals(tree.getRange(), tree2.getRange());
+}
+
+function testGetRange_MultiNullableKey() {
+  var comparator = new lf.index.MultiKeyComparatorWithNull(
+      lf.index.MultiKeyComparator.createOrders(2, lf.Order.ASC));
+  var tree = new lf.index.BTree('test', comparator, true);
+  var data = [
+    ['F', 'A'], ['F', 'B'], ['F', 'C'], ['F', 'D'],
+    ['G', 'B'], ['G', 'G'], ['G', 'X'],
+    ['P', 'K'], ['P', 'M'], ['P', 'P'],
+    ['S', 'A'], ['S', 'B'], ['S', 'C'], ['S', 'D'],
+    [null, 'Z'], ['Z', null], [null, null]
+  ];
+  for (var i = 0; i < data.length; ++i) {
+    tree.add(data[i], i);
+  }
+  var keyRange = [[
+    lf.index.SingleKeyRange.only('G'),
+    lf.index.SingleKeyRange.only('X')
+  ]];
+  assertArrayEquals([6], tree.getRange(keyRange));
+
+  var keyRange2 = [[
+    lf.index.SingleKeyRange.only('P'),
+    lf.index.SingleKeyRange.only('P')
+  ]];
+  assertArrayEquals([9], tree.getRange(keyRange2));
+
+  var keyRange3 = [[
+    lf.index.SingleKeyRange.lowerBound('P'),
+    lf.index.SingleKeyRange.upperBound('D')
+  ]];
+  assertArrayEquals([10, 11, 12, 13], tree.getRange(keyRange3));
+  assertArrayEquals([11, 12], tree.getRange(keyRange3, false, 2, 1));
+  assertArrayEquals([12, 11, 10], tree.getRange(keyRange3, true, 3, 1));
+
+  var keyRange4 = [[
+    lf.index.SingleKeyRange.lowerBound('S'),
+    lf.index.SingleKeyRange.all()
+  ]];
+  assertArrayEquals([10, 11, 12, 13, 15], tree.getRange(keyRange4));
+
+  assertArrayEquals(
+      [16, 14, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15],
+      tree.getRange());
+}
+
+function testGetRange_MultiKey() {
+  var comparator = new lf.index.MultiKeyComparator(
+      lf.index.MultiKeyComparator.createOrders(2, lf.Order.ASC));
+  var tree = new lf.index.BTree('test', comparator, true);
+  var tree2 = new lf.index.BTree('test2', comparator, false);
+  for (var i = 1; i <= 10; ++i) {
+    tree.add([i, i * 10], i);
+    tree2.add([i, i * 10], i);
+    tree2.add([i, i * 10], i * 100);
+  }
+  tree.add([11, 30], 11);
+  tree2.add([11, 30], 11);
+  tree2.add([11, 30], 1100);
+
+  var keyRange = [[
+    lf.index.SingleKeyRange.lowerBound(2, true),
+    lf.index.SingleKeyRange.only(30)
+  ]];
+  assertArrayEquals([3, 11], tree.getRange(keyRange));
+  assertArrayEquals([3, 300, 11, 1100], tree2.getRange(keyRange));
+
+  var keyRange2 = [[
+    lf.index.SingleKeyRange.only(11),
+    lf.index.SingleKeyRange.all()
+  ]];
+  assertArrayEquals([11], tree.getRange(keyRange2));
+  assertArrayEquals([11, 1100], tree2.getRange(keyRange2));
+}
+
+function testGetRange_MultiUniqueKey() {
+  var comparator = new lf.index.MultiKeyComparator(
+      lf.index.MultiKeyComparator.createOrders(2, lf.Order.ASC));
+  var tree = new lf.index.BTree('test', comparator, true);
+
+  for (var i = 1; i <= 3; ++i) {
+    for (var j = 1; j <= 5; ++j) {
+      tree.add([i, j], i * 100 + j);
+    }
+  }
+
+  var all = lf.index.SingleKeyRange.all();
+  var only = lf.index.SingleKeyRange.only(2);
+  var lowerBound = lf.index.SingleKeyRange.lowerBound(2);
+  var lowerBoundEx = lf.index.SingleKeyRange.lowerBound(2, true);
+  var upperBound = lf.index.SingleKeyRange.upperBound(2);
+  var upperBoundEx = lf.index.SingleKeyRange.upperBound(2, true);
+
+  assertArrayEquals([201, 202, 203, 204, 205], tree.getRange([[only, all]]));
+
+  // This is a corner case: [2, 2] is the root node, and we want to test if
+  // it works correctly.
+  assertArrayEquals([202], tree.getRange([[only, only]]));
+
+  assertArrayEquals([202, 203, 204, 205], tree.getRange([[only, lowerBound]]));
+  assertArrayEquals([203, 204, 205], tree.getRange([[only, lowerBoundEx]]));
+  assertArrayEquals([201, 202], tree.getRange([[only, upperBound]]));
+  assertArrayEquals([201], tree.getRange([[only, upperBoundEx]]));
 }

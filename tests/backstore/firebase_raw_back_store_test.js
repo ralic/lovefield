@@ -33,8 +33,10 @@ var asyncTestCase = goog.testing.AsyncTestCase.createAndInstall(
     'FirebaseRawBackStore');
 
 
+// Firebase WebSocket timeout is 30 seconds, so make sure this timeout is
+// greater than that value, otherwise it can flake.
 /** @type {number} */
-asyncTestCase.stepTimeout = 5000;  // Raise the timeout to 5 seconds
+asyncTestCase.stepTimeout = 40000;  // Raise the timeout to 40 seconds
 
 
 /** @type {!Firebase} */
@@ -57,14 +59,6 @@ var cache;
 var schema;
 
 
-/** @const {string} */
-var FB_URL = 'https://torrid-inferno-8867.firebaseIO.com/test';
-
-
-/** @const {string} */
-var FB_TOKEN = '';
-
-
 /** @type {boolean} */
 var manualMode;
 
@@ -81,8 +75,8 @@ var CONTENTS2 = {'id': 'hello2', 'name': 'world2'};
 function getFirebaseRef() {
   var resolver = goog.Promise.withResolver();
 
-  var ref = new Firebase(FB_URL);
-  ref.authWithCustomToken(FB_TOKEN, function(err, authData) {
+  var ref = new Firebase(window['FIREBASE_URL']);
+  ref.authWithCustomToken(window['FIREBASE_TOKEN'], function(err, authData) {
     if (err) {
       resolver.reject(err);
     } else {
@@ -115,13 +109,23 @@ function setUp() {
 
   indexStore = new lf.index.MemoryIndexStore();
   schema = new lf.testing.backstore.MockSchema();
-  schema.setName(schema.name() + goog.now());
+  schema.setName('msfr' + Date.now().toString() +
+      Math.floor(Math.random() * 1000).toString());
   cache = new lf.cache.DefaultCache(schema);
 
   global = lf.Global.get();
   global.registerService(lf.service.CACHE, cache);
   global.registerService(lf.service.INDEX_STORE, indexStore);
   global.registerService(lf.service.SCHEMA, schema);
+}
+
+
+function tearDown() {
+  if (!manualMode) {
+    return;
+  }
+
+  fb.child(schema.name()).remove();
 }
 
 

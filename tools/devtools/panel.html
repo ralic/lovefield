@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="panel.css" />
+    <script src="node_modules/jquery/dist/jquery.min.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <div class="left-panel" id="tables">
+        <div class="info">
+          <div class="info-left">
+            <b>Database:</b><select id="db_name"></select><br/>
+            <b>Version:</b><span id="db_version"></span>
+          </div>
+          <div class="info-right">
+            <input id="refresh" type="button" />
+          </div>
+        </div>
+        <ul id="table_list">
+        </ul>
+      </div>
+      <div class="right-panel">
+        <div>Page <select id="page_list"></select> of
+          <span id="page_count"></span>
+        </div>
+        <div id="data">
+        </div>
+      </div>
+    </div>
+    <span id="error_message"></span>
+    <script src="panel.js"></script>
+  </body>
+</html>

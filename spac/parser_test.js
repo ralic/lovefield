@@ -16,8 +16,7 @@
  */
 var fs = require('fs');
 var path = require('path');
-var parse = /** @type {{convert: !Function}} */ (
-    userRequire('parser')).convert;
+var parse = require('./parser').convert;
 
 describe('YAML Parser Test', function() {
   it('should parse codegen.yaml without issue', function() {
@@ -222,10 +221,6 @@ describe('YAML Parser Test', function() {
     thrower('index_on_nonexist_column.yaml');
   });
 
-  it('should throw if cross-column index on nullable column', function() {
-    thrower('index_on_nullable.yaml');
-  });
-
   it('should throw if index order were invalid', function() {
     thrower('invalid_index_order.yaml');
   });
@@ -240,5 +235,17 @@ describe('YAML Parser Test', function() {
 
   it('should throw if table had invalid name', function() {
     thrower('invalid_table_name.yaml');
+  });
+
+  it('should throw if primary key is also nullable', function() {
+    thrower('invalid_nullable.yaml');
+  });
+
+  it('should throw if cross-column primary key has invalid type', function() {
+    thrower('invalid_cross_column_key.yaml');
+  });
+
+  it('should throw if cross-column primary key is nullable', function() {
+    thrower('invalid_cross_column_key2.yaml');
   });
 });

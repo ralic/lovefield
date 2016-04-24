@@ -38,17 +38,32 @@ function setUp() {
 
 
 function testGetReferencingForeignKeys() {
-  var getRefs = function(tableName, info) {
-    var refs = info.getReferencingForeignKeys(tableName);
-    return !refs ? null : refs.map(function(ref) {
+  /**
+   * @param {!lf.schema.Info} info
+   * @param {string} tableName
+   * @param {!lf.ConstraintAction=} opt_constraintAction
+   * @return {?Array<string>}
+   */
+  var getRefs = function(info, tableName, opt_constraintAction) {
+    var refs = info.getReferencingForeignKeys(tableName, opt_constraintAction);
+    return goog.isNull(refs) ? null : refs.map(function(ref) {
       return ref.name;
     });
   };
 
   [dynamicInfo, staticInfo].forEach(function(info) {
-    assertNull(getRefs('DummyTable', info));
-    assertSameElements(['Country.fk_RegionId'], getRefs('Region', info));
-    assertSameElements(['Location.fk_CountryId'], getRefs('Country', info));
+    assertNull(getRefs(info, 'DummyTable'));
+    assertSameElements(['Country.fk_RegionId'], getRefs(info, 'Region'));
+    assertSameElements(
+        ['Country.fk_RegionId'],
+        getRefs(info, 'Region', lf.ConstraintAction.RESTRICT));
+    assertNull(getRefs(info, 'Region', lf.ConstraintAction.CASCADE));
+
+    assertSameElements(['Location.fk_CountryId'], getRefs(info, 'Country'));
+    assertSameElements(
+        ['Location.fk_CountryId'],
+        getRefs(info, 'Country', lf.ConstraintAction.RESTRICT));
+    assertNull(getRefs(info, 'Country', lf.ConstraintAction.CASCADE));
   });
 }
 
@@ -101,10 +116,12 @@ function testGetChildTables_All() {
 function testGetChildTables_Restrict() {
   [dynamicInfo, staticInfo].forEach(function(info) {
     var jobChildren = info.getChildTables('Job', lf.ConstraintAction.RESTRICT);
-    assertEquals(0, jobChildren.length);
+    assertEquals(1, jobChildren.length);
+    assertEquals('Employee', jobChildren[0].getName());
     var employeeChildren = info.getChildTables(
         'Employee', lf.ConstraintAction.RESTRICT);
-    assertEquals(0, employeeChildren.length);
+    assertEquals(1, employeeChildren.length);
+    assertEquals('JobHistory', employeeChildren[0].getName());
   });
 }
 
@@ -112,13 +129,11 @@ function testGetChildTables_Restrict() {
 function testGetChildTables_Cascade() {
   [dynamicInfo, staticInfo].forEach(function(info) {
     var jobChildren = info.getChildTables('Job', lf.ConstraintAction.CASCADE);
-    assertEquals(1, jobChildren.length);
-    assertEquals('Employee', jobChildren[0].getName());
+    assertEquals(0, jobChildren.length);
 
     var employeeChildren = info.getChildTables(
         'Employee', lf.ConstraintAction.CASCADE);
-    assertEquals(1, employeeChildren.length);
-    assertEquals('JobHistory', employeeChildren[0].getName());
+    assertEquals(0, employeeChildren.length);
   });
 }
 

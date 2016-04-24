@@ -1,6 +1,9 @@
 # Lovefield
 
-![Build Status](https://travis-ci.org/google/lovefield.svg?branch=master)
+[![Build Status](https://travis-ci.org/google/lovefield.svg?branch=master)](
+https://travis-ci.org/google/lovefield)
+[![NPM version](https://badge.fury.io/js/lovefield.svg)](https://badge.fury.io/js/lovefield)
+[![Bower version](https://badge.fury.io/bo/lovefield.svg)](https://badge.fury.io/bo/lovefield)
 
 Lovefield is a relational database written in pure JavaScript.
 It provides SQL-like syntax and works cross-browser (currently supporting
@@ -14,10 +17,7 @@ general Q&A, feedback, and discussions.
 
 [Frequently Asked Questions](docs/FAQ.md)
 
-[Specification](docs/spec_index.md) The spec is not fully implemented yet,
-please see the
-[issues](https://github.com/google/lovefield/labels/spec%20implementation)
-section for missing features.
+[Specification](docs/spec_index.md)
 
 [Developer Setup](docs/dev_setup.md)
 
@@ -31,4 +31,4 @@ Live 30min overview presentation at JS.LA (February 2015): Watch on
 [YouTube](https://www.youtube.com/watch?v=wRiI4p5Uk4E) or
 [Vimeo](https://vimeo.com/118934273).
 
-Note: Data persistence support on Safari is experimental.
+Note: Data persistence support on Safari or iOS WebView is experimental.

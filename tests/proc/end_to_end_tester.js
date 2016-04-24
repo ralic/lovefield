@@ -19,6 +19,7 @@ goog.provide('lf.testing.EndToEndTester');
 
 goog.require('goog.Promise');
 goog.require('goog.testing.jsunit');
+goog.require('lf.backstore.TableType');
 goog.require('lf.bind');
 goog.require('lf.testing.hrSchema.JobDataGenerator');
 goog.require('lf.testing.hrSchema.MockDataGenerator');
@@ -60,6 +61,7 @@ lf.testing.EndToEndTester = function(globalFn, connectFn) {
     [this.testInsert_NoPrimaryKey.bind(this), true],
     [this.testInsert_CrossColumnPrimaryKey.bind(this), false],
     [this.testInsert_CrossColumnUniqueKey.bind(this), false],
+    [this.testInsert_CrossColumnNullableIndex.bind(this), false],
     [this.testInsert_AutoIncrement.bind(this), false],
     [this.testInsert_FkViolation.bind(this), false],
     [this.testInsertOrReplace_AutoIncrement.bind(this), false],
@@ -71,6 +73,7 @@ lf.testing.EndToEndTester = function(globalFn, connectFn) {
     [this.testUpdate_FkViolation1.bind(this), true],
     [this.testUpdate_FkViolation2.bind(this), true],
     [this.testUpdate_Predicate.bind(this), true],
+    [this.testUpdate_BindMultiple.bind(this), true],
     [this.testUpdate_UnboundPredicate.bind(this), true],
     [this.testDelete_FkViolation.bind(this), true],
     [this.testDelete_Predicate.bind(this), true],
@@ -91,6 +94,7 @@ lf.testing.EndToEndTester.prototype.run = function() {
   this.testCases_.forEach(function(testCase) {
     tests.push(this.setUp_.bind(this, testCase[1]));
     tests.push(testCase[0]);
+    tests.push(this.tearDown_.bind(this));
   }, this);
 
   return lf.testing.util.sequentiallyRun(tests);
@@ -130,6 +134,16 @@ lf.testing.EndToEndTester.prototype.setUp_ = function(addSampleData) {
           return this.addSampleData_();
         }
       }.bind(this));
+};
+
+
+/**
+ * @return {!IThenable}
+ * @private
+ */
+lf.testing.EndToEndTester.prototype.tearDown_ = function() {
+  this.db_.close();
+  return goog.Promise.resolve();
 };
 
 
@@ -276,6 +290,54 @@ lf.testing.EndToEndTester.prototype.testInsert_CrossColumnUniqueKey =
         assertEquals(201, e.code);
         lf.testing.EndToEndTester.markDone_(
                 'testInsert_CrossColumnUniqueKey');
+      });
+};
+
+
+/** @return {!IThenable} */
+lf.testing.EndToEndTester.prototype.testInsert_CrossColumnNullableIndex =
+    function() {
+  var table = this.db_.getSchema().table('CrossColumnTable');
+
+  // Creating two rows where 'uq_constraint' is violated.
+  var row1 = table.createRow({
+    'integer1': 1,
+    'integer2': 2,
+    'string1': 'A',
+    'string2': 'Z',
+  });
+  var row2 = table.createRow({
+    'integer1': 2,
+    'integer2': 3,
+    'string1': 'B',
+    'string2': null
+  });
+  var row3 = table.createRow({
+    'integer1': 3,
+    'integer2': 4,
+    'string1': null,
+    'string2': 'Y',
+  });
+  var row4 = table.createRow({
+    'integer1': 5,
+    'integer2': 6,
+    'string1': null,
+    'string2': null,
+  });
+
+  var rows = [row1, row2, row3, row4];
+  return this.db_.insert().into(table).values(rows).exec().then(
+      function(results) {
+        assertEquals(4, results.length);
+        return this.db_.select().from(table).orderBy(table.integer1).exec();
+      }.bind(this)).then(
+      function(results) {
+        var expected = rows.map(function(row) {
+          return row.payload();
+        });
+        assertArrayEquals(expected, results);
+        lf.testing.EndToEndTester.markDone_(
+            'testInsert_CrossColumnNullableIndex');
       });
 };
 
@@ -468,7 +530,8 @@ lf.testing.EndToEndTester.prototype.checkAutoIncrement_ = function(builderFn) {
 
   // Adding a row with a manually assigned primary key. This ID should not be
   // replaced by an automatically assigned ID.
-  var manuallyAssignedId = 1000;
+  var manuallyAssignedId = firstBatch.length + secondBatch.length +
+      thirdBatch.length + 1000;
   var manualRow = c.createRow();
   manualRow.payload()['id'] = manuallyAssignedId;
   manualRow.payload()['regionId'] = 'regionId';
@@ -509,6 +572,25 @@ lf.testing.EndToEndTester.prototype.checkAutoIncrement_ = function(builderFn) {
             assertEquals(manuallyAssignedId, row.payload()['id']);
           }
         });
+
+        // Testing that previously assigned primary keys that have now been
+        // freed are not re-used.
+        // Removing the row with the max primary key encountered so far.
+        return this.db_.delete().from(c).where(
+            c.id.eq(manuallyAssignedId)).exec();
+      }.bind(this)).then(
+      function() {
+        // Adding a new row. Expecting that the automatically assigned primary
+        // key will be greater than the max primary key ever encountered in this
+        // table (even if that key has now been freed).
+        var manualRow2 = c.createRow();
+        manualRow2.payload()['id'] = null;
+        manualRow2.payload()['regionId'] = 'regionId';
+        return builderFn().into(c).values([manualRow2]).exec();
+      }).then(
+      function(results) {
+        assertEquals(1, results.length);
+        assertEquals(manuallyAssignedId + 1, results[0][c.id.getName()]);
       });
 };
 
@@ -539,6 +621,46 @@ lf.testing.EndToEndTester.prototype.testUpdate_All = function() {
         });
         lf.testing.EndToEndTester.markDone_('testUpdate_All');
       });
+};
+
+
+/**
+ * Tests a templatized UPDATE query where multiple queries are executed in
+ * parallel. It ensures that each query respects the values it was bound too.
+ * @return {!IThenable}
+ */
+lf.testing.EndToEndTester.prototype.testUpdate_BindMultiple = function() {
+  var jobId1 = this.sampleJobs_[0].payload()['id'];
+  var jobId2 = this.sampleJobs_[1].payload()['id'];
+  var minSalary1After = 0;
+  var maxSalary1After = 105;
+  var minSalary2After = 100;
+  var maxSalary2After = 305;
+  var bindValues = [
+    [minSalary1After, maxSalary1After, jobId1],
+    [minSalary2After, maxSalary2After, jobId2]
+  ];
+  var query = this.db_.update(this.j_).
+      set(this.j_.minSalary, lf.bind(0)).
+      set(this.j_.maxSalary, lf.bind(1)).
+      where(this.j_.id.eq(lf.bind(2)));
+
+  var promises = bindValues.map(function(values) {
+    return query.bind(values).exec();
+  });
+  return goog.Promise.all(promises).then(function() {
+    return this.db_.select().
+        from(this.j_).
+        where(this.j_.id.in([jobId1, jobId2])).
+        orderBy(this.j_.id, lf.Order.ASC).
+        exec();
+  }.bind(this)).then(function(results) {
+    assertEquals(minSalary1After, results[0].minSalary);
+    assertEquals(maxSalary1After, results[0].maxSalary);
+    assertEquals(minSalary2After, results[1].minSalary);
+    assertEquals(maxSalary2After, results[1].maxSalary);
+    lf.testing.EndToEndTester.markDone_('testUpdate_BindMultiple');
+  });
 };
 
 

@@ -21,6 +21,7 @@ goog.require('goog.testing.jsunit');
 goog.require('hr.db');
 goog.require('lf.TransactionType');
 goog.require('lf.backstore.ExternalChangeObserver');
+goog.require('lf.backstore.TableType');
 goog.require('lf.cache.Journal');
 goog.require('lf.schema.DataStoreType');
 goog.require('lf.service');
@@ -75,6 +76,11 @@ function setUp() {
 
         asyncTestCase.continueTesting();
       }, fail);
+}
+
+
+function tearDown() {
+  db.close();
 }
 
 
@@ -207,11 +213,13 @@ function testOrder_Observer_ExternalChange() {
 function simulateInsertionModification(tableSchema, rows) {
   var tx = mockStore.createTx(
       lf.TransactionType.READ_WRITE,
+      [tableSchema],
       new lf.cache.Journal(hr.db.getGlobal(),
           lf.structs.set.create([tableSchema])));
   var table = tx.getTable(
       tableSchema.getName(),
-      tableSchema.deserializeRow.bind(tableSchema));
+      tableSchema.deserializeRow.bind(tableSchema),
+      lf.backstore.TableType.DATA);
   table.put(rows);
   return tx.commit();
 }
@@ -226,11 +234,13 @@ function simulateInsertionModification(tableSchema, rows) {
 function simulateDeletion(tableSchema, rows) {
   var tx = mockStore.createTx(
       lf.TransactionType.READ_WRITE,
+      [tableSchema],
       new lf.cache.Journal(hr.db.getGlobal(),
           lf.structs.set.create([tableSchema])));
   var table = tx.getTable(
       tableSchema.getName(),
-      tableSchema.deserializeRow.bind(tableSchema));
+      tableSchema.deserializeRow.bind(tableSchema),
+      lf.backstore.TableType.DATA);
 
   var rowIds = rows.map(function(row) { return row.id(); });
   table.remove(rowIds);

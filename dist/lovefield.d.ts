@@ -66,12 +66,21 @@ declare module lf {
 
   function bind(index: number): Binder;
 
+  export interface TransactionStats {
+    success(): boolean
+    insertedRowCount(): Number
+    updatedRowCount(): Number
+    deletedRowCount(): Number
+    changedTableCount(): Number
+  }
+
   export interface Transaction {
     attach(query: query.Builder): Promise<Array<Object>>
     begin(scope: Array<schema.Table>): Promise<void>
     commit(): Promise<void>
     exec(queries: Array<query.Builder>): Promise<Array<Array<Object>>>
     rollback(): Promise<void>
+    stats(): TransactionStats
   }
 
   export enum TransactionType { READ_ONLY, READ_WRITE }
@@ -188,7 +197,7 @@ declare module lf {
     }
 
     export interface Builder {
-      connect(options: ConnectOptions): Promise<lf.Database>
+      connect(options?: ConnectOptions): Promise<lf.Database>
       createTable(tableName: string): TableBuilder
       getSchema(): Database
       setPragma(pragma: DatabasePragma): void
@@ -203,8 +212,8 @@ declare module lf {
     type RawForeignKeySpec = {
       local: string
       ref: string
-      action: lf.ConstraintAction
-      timing: lf.ConstraintAction
+      action?: lf.ConstraintAction
+      timing?: lf.ConstraintTiming
     }
 
     export interface TableBuilder {
@@ -213,9 +222,11 @@ declare module lf {
       addIndex(
           name: string, columns: Array<string>|Array<IndexedColumn>,
           unique?: boolean, order?: Order): TableBuilder
-      addNullable(columns: Array<Column>): TableBuilder
-      addPrimaryKey(columns: Array<string>|Array<IndexedColumn>): TableBuilder
-      addUnique(name: string, columns: Array<Column>): TableBuilder
+      addNullable(columns: Array<string>): TableBuilder
+      addPrimaryKey(
+          columns: Array<string>|Array<IndexedColumn>,
+          autoInc?: boolean): TableBuilder
+      addUnique(name: string, columns: Array<string>): TableBuilder
     }
 
     function create(dbName: string, dbVersion: number): Builder

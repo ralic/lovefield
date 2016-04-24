@@ -17,12 +17,9 @@
 goog.setTestOnly();
 goog.require('goog.testing.jsunit');
 goog.require('hr.db');
-goog.require('lf.cache.Journal');
 goog.require('lf.proc.GroupByStep');
 goog.require('lf.proc.NoOpStep');
 goog.require('lf.proc.Relation');
-goog.require('lf.schema.DataStoreType');
-goog.require('lf.structs.set');
 goog.require('lf.testing.hrSchema.MockDataGenerator');
 
 
@@ -44,7 +41,6 @@ function setUp() {
   e = schema.getEmployee();
   dataGenerator = new lf.testing.hrSchema.MockDataGenerator(schema);
   dataGenerator.generate(20, 100, 0);
-  return hr.db.connect({storeType: lf.schema.DataStoreType.MEMORY});
 }
 
 
@@ -61,9 +57,7 @@ function testExec_SingleColumn() {
   groupByStep.addChild(childStep);
 
   var employeesPerJob = dataGenerator.employeeGroundTruth.employeesPerJob;
-  var journal =
-      new lf.cache.Journal(hr.db.getGlobal(), lf.structs.set.create());
-  return groupByStep.exec(journal).then(function(relations) {
+  return groupByStep.exec().then(function(relations) {
     var jobIds = employeesPerJob.getKeys();
     assertEquals(jobIds.length, relations.length);
     relations.forEach(function(relation) {
@@ -90,9 +84,7 @@ function testExec_MultiColumn() {
   var groupByStep = new lf.proc.GroupByStep([j.minSalary, j.maxSalary]);
   groupByStep.addChild(childStep);
 
-  var journal =
-      new lf.cache.Journal(hr.db.getGlobal(), lf.structs.set.create());
-  return groupByStep.exec(journal).then(function(relations) {
+  return groupByStep.exec().then(function(relations) {
     var jobCount = 0;
     relations.forEach(function(relation) {
       var groupByMinSalary = relation.entries[0].getField(j.minSalary);

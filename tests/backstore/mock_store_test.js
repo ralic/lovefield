@@ -20,6 +20,7 @@ goog.require('goog.testing.jsunit');
 goog.require('lf.Global');
 goog.require('lf.TransactionType');
 goog.require('lf.backstore.ObservableStore');
+goog.require('lf.backstore.TableType');
 goog.require('lf.cache.DefaultCache');
 goog.require('lf.cache.Journal');
 goog.require('lf.index.MemoryIndexStore');
@@ -138,11 +139,13 @@ function testSimulateExternalChange() {
   // are triggered via the MockStore should result in events firing on the
   // actual backing store observers.
   var tx = mockStore.createTx(
-      lf.TransactionType.READ_WRITE,
-      new lf.cache.Journal(lf.Global.get(),
-          lf.structs.set.create([tableSchema])));
+      lf.TransactionType.READ_WRITE, [tableSchema],
+      new lf.cache.Journal(
+          lf.Global.get(), lf.structs.set.create([tableSchema])));
   var table = tx.getTable(
-      tableSchema.getName(), tableSchema.deserializeRow.bind(tableSchema));
+      tableSchema.getName(),
+      tableSchema.deserializeRow.bind(tableSchema),
+      lf.backstore.TableType.DATA);
 
   // Insert 10 rows.
   table.put(rows).then(function() {

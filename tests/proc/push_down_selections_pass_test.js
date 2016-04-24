@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 goog.setTestOnly();
-goog.require('goog.testing.AsyncTestCase');
 goog.require('goog.testing.jsunit');
 goog.require('hr.db');
 goog.require('lf.Order');
@@ -26,13 +25,8 @@ goog.require('lf.proc.PushDownSelectionsPass');
 goog.require('lf.proc.SelectNode');
 goog.require('lf.proc.TableAccessNode');
 goog.require('lf.query.SelectContext');
-goog.require('lf.schema.DataStoreType');
+goog.require('lf.structs.set');
 goog.require('lf.testing.treeutil');
-
-
-/** @type {!goog.testing.AsyncTestCase} */
-var asyncTestCase = goog.testing.AsyncTestCase.createAndInstall(
-    'PushDownSelectionsPassTest');
 
 
 /** @type {!lf.schema.Database} */
@@ -44,13 +38,8 @@ var pass;
 
 
 function setUp() {
-  asyncTestCase.waitForAsync('setUp');
-  hr.db.connect({storeType: lf.schema.DataStoreType.MEMORY}).then(function(db) {
-    schema = db.getSchema();
-    pass = new lf.proc.PushDownSelectionsPass();
-  }).then(function() {
-    asyncTestCase.continueTesting();
-  }, fail);
+  schema = hr.db.getSchema();
+  pass = new lf.proc.PushDownSelectionsPass();
 }
 
 
@@ -120,7 +109,7 @@ function testTree_ValuePredicates1() {
  * pushed further down. Ensuring that no endless recursion occurs (swapping the
  * select nodes with each other indefinitely).
  */
-function testTree_ValuePredicates2() {
+function testTree_ValuePredicates2_Unaffected() {
   var e = schema.getEmployee();
 
   var treeBefore =
@@ -200,15 +189,83 @@ function testTree_ValuePredicates3() {
 
 
 /**
+ * Tests a tree where two value predicates and two join predicates exist (one
+ * outer, one inner).
+ * It ensures that
+ *  1) The two value predicates are not pushed below the outer join predicates.
+ *  2) The join predicate closer to the root is pushed below the outer join
+ *     predicate further from the root..
+ */
+function testTree_MixedJoinPredicates_WithWhere() {
+  var treeBefore =
+      'select(value_pred(Department.id eq null))\n' +
+      '-select(value_pred(Job.id eq null))\n' +
+      '--select(join_pred(Employee.jobId eq Job.id))\n' +
+      '---select(join_pred(Employee.departmentId eq Department.id))\n' +
+      '----cross_product\n' +
+      '-----cross_product\n' +
+      '------table_access(Employee)\n' +
+      '------table_access(Job)\n' +
+      '-----table_access(Department)\n';
+
+  var treeAfter =
+      'select(value_pred(Department.id eq null))\n' +
+      '-select(value_pred(Job.id eq null))\n' +
+      '--select(join_pred(Employee.departmentId eq Department.id))\n' +
+      '---cross_product\n' +
+      '----select(join_pred(Employee.jobId eq Job.id))\n' +
+      '-----cross_product\n' +
+      '------table_access(Employee)\n' +
+      '------table_access(Job)\n' +
+      '----table_access(Department)\n';
+
+  var constructTree = function() {
+    var d = schema.getDepartment();
+    var e = schema.getEmployee();
+    var j = schema.getJob();
+
+    var queryContext = new lf.query.SelectContext(hr.db.getSchema());
+    queryContext.from = [e, j, d];
+    var innerJoinPredicate = e.jobId.eq(j.id);
+    var outerJoinPredicate = e.departmentId.eq(d.id);
+    var valuePredicate1 = d.id.isNull();
+    var valuePredicate2 = j.id.isNull();
+    queryContext.where = lf.op.and(
+        valuePredicate1, valuePredicate2,
+        innerJoinPredicate, outerJoinPredicate);
+    queryContext.outerJoinPredicates = lf.structs.set.create();
+    queryContext.outerJoinPredicates.add(outerJoinPredicate.getId());
+
+    var crossProductNode1 = new lf.proc.CrossProductNode();
+    crossProductNode1.addChild(new lf.proc.TableAccessNode(e));
+    crossProductNode1.addChild(new lf.proc.TableAccessNode(j));
+    var crossProductNode2 = new lf.proc.CrossProductNode();
+    crossProductNode2.addChild(crossProductNode1);
+    crossProductNode2.addChild(new lf.proc.TableAccessNode(d));
+
+    var selectNode1 = new lf.proc.SelectNode(valuePredicate1);
+    var selectNode2 = new lf.proc.SelectNode(valuePredicate2);
+    var selectNode3 = new lf.proc.SelectNode(innerJoinPredicate);
+    var selectNode4 = new lf.proc.SelectNode(outerJoinPredicate);
+    selectNode1.addChild(selectNode2);
+    selectNode2.addChild(selectNode3);
+    selectNode3.addChild(selectNode4);
+    selectNode4.addChild(crossProductNode2);
+
+    return {queryContext: queryContext, root: selectNode1};
+  };
+
+  lf.testing.treeutil.assertTreeTransformation(
+      constructTree(), treeBefore, treeAfter, pass);
+}
+
+
+/**
  * Tests a tree that involves a 3 table join. It ensures that the JoinPredicate
  * nodes are pushed down until they become parents of the appropriate cross
  * product node.
  */
 function testTree_JoinPredicates() {
-  var d = schema.getDepartment();
-  var e = schema.getEmployee();
-  var j = schema.getJob();
-
   var treeBefore =
       'select(join_pred(Employee.jobId eq Job.id))\n' +
       '-select(join_pred(Employee.departmentId eq Department.id))\n' +
@@ -228,6 +285,10 @@ function testTree_JoinPredicates() {
       '--table_access(Department)\n';
 
   var constructTree = function() {
+    var d = schema.getDepartment();
+    var e = schema.getEmployee();
+    var j = schema.getJob();
+
     var queryContext = new lf.query.SelectContext(hr.db.getSchema());
     queryContext.from = [e, j, d];
     var predicate1 = e.departmentId.eq(d.id);
@@ -388,6 +449,102 @@ function testTree_JoinPredicates3() {
     selectNode2.addChild(selectNode1);
 
     return {queryContext: queryContext, root: selectNode2};
+  };
+
+  lf.testing.treeutil.assertTreeTransformation(
+      constructTree(), treeBefore, treeAfter, pass);
+}
+
+
+/**
+ * Tests a tree that involves a left outer join and also has an additional
+ * value predicate. It ensures that the value predicate is not pushed below the
+ * join predicate, such that the join operation is performed before the value
+ * predicate is applied.
+ */
+function testTree_OuterJoinPredicate_Unaffected() {
+  var r = schema.getRegion();
+  var c = schema.getCountry();
+
+  var treeBefore =
+      'select(value_pred(Country.id eq 1))\n' +
+      '-select(join_pred(Region.id eq Country.regionId))\n' +
+      '--cross_product\n' +
+      '---table_access(Region)\n' +
+      '---table_access(Country)\n';
+
+  var constructTree = function() {
+    var queryContext = new lf.query.SelectContext(hr.db.getSchema());
+    queryContext.from = [r, c];
+    var valuePredicate = c.id.eq(1);
+    var joinPredicate = r.id.eq(c.regionId);
+    queryContext.where = lf.op.and(valuePredicate, joinPredicate);
+    queryContext.outerJoinPredicates = lf.structs.set.create();
+    queryContext.outerJoinPredicates.add(joinPredicate.getId());
+
+    var selectNode1 = new lf.proc.SelectNode(valuePredicate);
+    var selectNode2 = new lf.proc.SelectNode(joinPredicate);
+    var crossProductNode = new lf.proc.CrossProductNode();
+
+    selectNode1.addChild(selectNode2);
+    selectNode2.addChild(crossProductNode);
+    crossProductNode.addChild(new lf.proc.TableAccessNode(r));
+    crossProductNode.addChild(new lf.proc.TableAccessNode(c));
+
+    return {queryContext: queryContext, root: selectNode1};
+  };
+
+  lf.testing.treeutil.assertTreeTransformation(
+      constructTree(), treeBefore, treeBefore, pass);
+}
+
+
+/**
+ * Tests a tree where to OR predicates exist, each one refers to a single table.
+ * They should both be pushed down below the cross-product node, and
+ * specifically towards the branch that matches the table each predicate refers
+ * to.
+ */
+function testTree_CombinedPredicates_Or() {
+  var e = schema.getEmployee();
+  var j = schema.getJob();
+
+  var treeBefore =
+      'order_by(Employee.id ASC)\n' +
+      '-select(combined_pred_or)\n' +
+      '--select(combined_pred_or)\n' +
+      '---cross_product\n' +
+      '----table_access(Employee)\n' +
+      '----table_access(Job)\n';
+
+  var treeAfter =
+      'order_by(Employee.id ASC)\n' +
+      '-cross_product\n' +
+      '--select(combined_pred_or)\n' +
+      '---table_access(Employee)\n' +
+      '--select(combined_pred_or)\n' +
+      '---table_access(Job)\n';
+
+  var constructTree = function() {
+    var queryContext = new lf.query.SelectContext(hr.db.getSchema());
+    queryContext.from = [e, j];
+    var predicate1 = lf.op.or(e.salary.gt(1000), e.commissionPercent.gt(10));
+    var predicate2 = lf.op.or(j.minSalary.gt(100), j.maxSalary.gt(200));
+    queryContext.where = lf.op.and(predicate1, predicate2);
+    queryContext.orderBy = [{column: e.id, order: lf.Order.ASC}];
+
+    var orderByNode = new lf.proc.OrderByNode(queryContext.orderBy);
+    var selectNode1 = new lf.proc.SelectNode(predicate1);
+    var selectNode2 = new lf.proc.SelectNode(predicate2);
+    var crossProductNode = new lf.proc.CrossProductNode();
+    orderByNode.addChild(selectNode1);
+    selectNode1.addChild(selectNode2);
+    selectNode2.addChild(crossProductNode);
+    queryContext.from.forEach(function(tableSchema) {
+      crossProductNode.addChild(new lf.proc.TableAccessNode(tableSchema));
+    });
+
+    return {queryContext: queryContext, root: orderByNode};
   };
 
   lf.testing.treeutil.assertTreeTransformation(

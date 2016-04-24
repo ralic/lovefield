@@ -17,8 +17,8 @@
 goog.setTestOnly();
 goog.require('goog.testing.AsyncTestCase');
 goog.require('goog.testing.jsunit');
+goog.require('lf.Capability');
 goog.require('lf.schema.DataStoreType');
-goog.require('lf.testing.Capability');
 goog.require('lf.testing.hrSchema.MockDataGenerator');
 goog.require('lf.testing.hrSchema.getSchemaBuilder');
 goog.require('lf.testing.util');
@@ -33,12 +33,12 @@ var asyncTestCase = goog.testing.AsyncTestCase.createAndInstall(
 asyncTestCase.stepTimeout = 30 * 1000;  // 30 seconds.
 
 
-/** @type {!lf.testing.Capability} */
+/** @type {!lf.Capability} */
 var capability;
 
 
 function setUpPage() {
-  capability = lf.testing.Capability.get();
+  capability = lf.Capability.get();
 }
 
 
@@ -47,8 +47,11 @@ function setUpPage() {
  * @return {!IThenable}
  */
 function runTestImport(options) {
-  var builder1 = lf.testing.hrSchema.getSchemaBuilder();
-  var builder2 = lf.testing.hrSchema.getSchemaBuilder();
+  // Need to guarantee that the two DBs have different names.
+  var builder1 = lf.testing.hrSchema.getSchemaBuilder(
+      'hr1_' + new Date().getTime());
+  var builder2 = lf.testing.hrSchema.getSchemaBuilder(
+      'hr2_' + new Date().getTime());
   var dataGen = new lf.testing.hrSchema.MockDataGenerator(builder1.getSchema());
   dataGen.generate(
       /* jobCount */ 100, /* employeeCount */ 1000, /* departmentCount */ 10);

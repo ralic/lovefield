@@ -18,8 +18,8 @@ goog.setTestOnly();
 goog.require('goog.testing.AsyncTestCase');
 goog.require('goog.testing.jsunit');
 goog.require('hr.bdb');
+goog.require('lf.Capability');
 goog.require('lf.backstore.Page');
-goog.require('lf.testing.Capability');
 goog.require('lf.testing.SmokeTester');
 
 
@@ -32,7 +32,7 @@ var asyncTestCase =
 var tester;
 
 
-/** @type {!lf.testing.Capability} */
+/** @type {!lf.Capability} */
 var capability;
 
 
@@ -41,7 +41,7 @@ var db;
 
 
 function setUpPage() {
-  capability = lf.testing.Capability.get();
+  capability = lf.Capability.get();
 }
 
 
@@ -59,6 +59,16 @@ function setUp() {
     asyncTestCase.continueTesting();
   }, fail);
 }
+
+
+function tearDown() {
+  if (!capability.indexedDb) {
+    return;
+  }
+
+  db.close();
+}
+
 
 
 function testCRUD() {

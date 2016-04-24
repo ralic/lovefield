@@ -24,18 +24,19 @@ var yamlMod = /** @type {{safeLoad: !Function}} */ (require('js-yaml'));
 
 function loadLovefield() {
   var pathMod = require('path');
-  var fs = require('fs');
   var moduleName = 'node_bootstrap';
 
-  // Try this path first.
-  var moduleFile = pathMod.resolve(__dirname +
-      '/node_modules/' + moduleName + '/' + moduleName + '.js');
-  if (!fs.existsSync(moduleFile)) {
-    moduleFile = pathMod.resolve(__dirname, '..', 'tools', moduleName + '.js');
+  var nodeBootstrapModule;
+  try {
+    // Try this path first.
+    nodeBootstrapModule = require(moduleName + '/' + moduleName + '.js');
+  } catch (e) {
+    nodeBootstrapModule = require(
+        pathMod.resolve(__dirname, '..', 'tools', moduleName + '.js'));
   }
 
   /** @type {{loadLkgrJs: !Function}} */ (
-      require(moduleFile)).loadLkgrJs();
+      nodeBootstrapModule.loadLkgrJs());
 }
 
 loadLovefield();
@@ -63,7 +64,7 @@ var ForeignKeySpec_;
  *   }>),
  *   nullable: !Array<string>,
  *   unique: {column: !Array<string>},
- *   foreignKey: !Array<!ForeignKeySpec_>
+ *   foreignKey: !Object<!ForeignKeySpec_>
  * }}
  * @private
  */

@@ -1,8 +1,8 @@
 {
   "name": "lovefield",
-  "version": "2.0.63",
+  "version": "2.1.7",
   "main": "dist/lovefield.min.js",
-  "description": "Lovefield - A Data Access Library",
+  "description": "Lovefield - A relational database for web apps",
   "keywords": [
     "lovefield"
   ],
@@ -38,17 +38,17 @@
     "google-closure-compiler": "latest",
     "google-closure-library": "latest",
     "gulp": "^3.9.0",
-    "gulp-closure-compiler": "^0.2.18",
+    "gulp-closure-compiler": "0.3.1",
     "gulp-connect": "^2.2.0",
     "gulp-gjslint": "^0.1.4",
-    "minijasminenode": "^1.1.1",
+    "jasmine": "^2.3.2",
     "mkdirp": "^0.5.0",
     "request": "^2.55.0",
-    "selenium-webdriver": "^2.45.1",
+    "selenium-webdriver": "2.47.0",
     "temporary": "^0.0.8",
     "toposort-class": "^0.3.1"
   },
   "engines": {
-    "node": ">=0.12"
+    "node": ">=4.3"
   }
 }

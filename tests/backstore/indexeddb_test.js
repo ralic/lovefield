@@ -20,16 +20,17 @@ goog.require('goog.functions');
 goog.require('goog.testing.AsyncTestCase');
 goog.require('goog.testing.PropertyReplacer');
 goog.require('goog.testing.jsunit');
+goog.require('lf.Capability');
 goog.require('lf.Global');
 goog.require('lf.Row');
 goog.require('lf.TransactionType');
 goog.require('lf.backstore.IndexedDB');
+goog.require('lf.backstore.TableType');
 goog.require('lf.cache.DefaultCache');
 goog.require('lf.cache.Journal');
 goog.require('lf.index.MemoryIndexStore');
 goog.require('lf.service');
 goog.require('lf.structs.set');
-goog.require('lf.testing.Capability');
 goog.require('lf.testing.backstore.MockSchema');
 goog.require('lf.testing.backstore.ScudTester');
 goog.require('lf.testing.util');
@@ -59,13 +60,13 @@ var schema;
 var db;
 
 
-/** @type {!lf.testing.Capability} */
+/** @type {!lf.Capability} */
 var capability;
 
 
 function setUpPage() {
   propertyReplacer = new goog.testing.PropertyReplacer();
-  capability = lf.testing.Capability.get();
+  capability = lf.Capability.get();
 }
 
 
@@ -96,10 +97,12 @@ function tearDown() {
   var promises = schema.tables().map(
       function(table) {
         var tx = db.createTx(
-            lf.TransactionType.READ_WRITE,
-            createJournal([table]));
+            lf.TransactionType.READ_WRITE, [table], createJournal([table]));
         var store = /** @type {!lf.backstore.ObjectStore} */ (
-            tx.getTable(table.getName(), table.deserializeRow.bind(table)));
+            tx.getTable(
+                table.getName(),
+                table.deserializeRow.bind(table),
+                lf.backstore.TableType.DATA));
 
         store.remove([]);
         return tx.commit();
@@ -178,33 +181,48 @@ function testTwoTableInserts_Bundled() {
   var row3 = lf.Row.create(CONTENTS2);
   var row4 = new lf.Row(row.id(), CONTENTS2);
 
+  /**
+   * @param {!lf.backstore.Tx} tx
+   * @return {!lf.backstore.ObjectStore}
+   */
+  var getTableA = function(tx) {
+    return /** @type {!lf.backstore.ObjectStore} */ (tx.getTable(
+        tableA.getName(),
+        tableA.deserializeRow.bind(tableA),
+        lf.backstore.TableType.DATA));
+  };
+
+  /**
+   * @param {!lf.backstore.Tx} tx
+   * @return {!lf.backstore.ObjectStore}
+   */
+  var getTableB = function(tx) {
+    return /** @type {!lf.backstore.ObjectStore} */ (tx.getTable(
+        tableB.getName(),
+        tableB.deserializeRow.bind(tableB),
+        lf.backstore.TableType.DATA));
+  };
+
   asyncTestCase.waitForAsync('testTwoTableInserts_Bundled');
   return db.init().then(function() {
     var tx = db.createTx(
-        lf.TransactionType.READ_WRITE,
-        createJournal([tableA]));
-    var store = /** @type {!lf.backstore.ObjectStore} */ (
-        tx.getTable(tableA.getName(), tableA.deserializeRow.bind(tableA)));
+        lf.TransactionType.READ_WRITE, [tableA], createJournal([tableA]));
+    var store = getTableA(tx);
 
     // insert row1 into table A
     store.put([row]);
     return tx.commit();
   }).then(function() {
     var tx = db.createTx(
-        lf.TransactionType.READ_WRITE,
-        createJournal([tableB]));
-    var store = /** @type {!lf.backstore.ObjectStore} */ (
-        tx.getTable(tableB.getName(), tableB.deserializeRow.bind(tableB)));
+        lf.TransactionType.READ_WRITE, [tableB], createJournal([tableB]));
+    var store = getTableB(tx);
 
     // insert row2 into table B
     store.put([row2]);
     return tx.commit();
   }).then(function() {
-    var tx = db.createTx(
-        lf.TransactionType.READ_ONLY,
-        createJournal([tableB]));
-    var store = /** @type {!lf.backstore.ObjectStore} */ (
-        tx.getTable(tableB.getName(), tableB.deserializeRow.bind(tableB)));
+    var tx = db.createTx(lf.TransactionType.READ_ONLY, [tableB]);
+    var store = getTableB(tx);
 
     // get row2 from table B
     return store.get([row2.id()]);
@@ -214,10 +232,8 @@ function testTwoTableInserts_Bundled() {
     assertObjectEquals(CONTENTS, results[0].payload());
 
     var tx = db.createTx(
-        lf.TransactionType.READ_WRITE,
-        createJournal([tableA]));
-    var store = /** @type {!lf.backstore.ObjectStore} */ (
-        tx.getTable(tableA.getName(), tableA.deserializeRow.bind(tableA)));
+        lf.TransactionType.READ_WRITE, [tableA], createJournal([tableA]));
+    var store = getTableA(tx);
 
     // update row1, insert row3 into table A
     store.put([row4, row3]);
@@ -235,10 +251,8 @@ function testTwoTableInserts_Bundled() {
     cache.setMany(tableA.getName(), [row4, row3]);
 
     var tx = db.createTx(
-        lf.TransactionType.READ_WRITE,
-        createJournal([tableA]));
-    var store = /** @type {!lf.backstore.ObjectStore} */ (
-        tx.getTable(tableA.getName(), tableA.deserializeRow.bind(tableA)));
+        lf.TransactionType.READ_WRITE, [tableA], createJournal([tableA]));
+    var store = getTableA(tx);
 
     // remove row1
     store.remove([row3.id()]);
@@ -282,10 +296,12 @@ function testScanRowId() {
   var insertIntoTable = function(rows) {
     var table = schema.table('tableA');
     var tx = db.createTx(
-        lf.TransactionType.READ_WRITE,
-        createJournal([table]));
+        lf.TransactionType.READ_WRITE, [table], createJournal([table]));
     var store = /** @type {!lf.backstore.ObjectStore} */ (
-        tx.getTable(table.getName(), table.deserializeRow.bind(table)));
+        tx.getTable(
+            table.getName(),
+            table.deserializeRow.bind(table),
+            lf.backstore.TableType.DATA));
     store.put(rows);
     return tx.commit();
   };
@@ -342,10 +358,12 @@ function testScanRowId_BundledDB() {
 
     var table = schema.table('tableA');
     var tx = db.createTx(
-        lf.TransactionType.READ_WRITE,
-        createJournal([table]));
+        lf.TransactionType.READ_WRITE, [table], createJournal([table]));
     var store = /** @type {!lf.backstore.ObjectStore} */ (
-        tx.getTable(table.getName(), table.deserializeRow.bind(table)));
+        tx.getTable(
+            table.getName(),
+            table.deserializeRow.bind(table),
+            lf.backstore.TableType.DATA));
 
     store.put(rows);
     return tx.commit();
@@ -413,10 +431,12 @@ function testUpgrade() {
     var table = schema.tables().slice(-1)[0];
     assertEquals('tablePlusOne', table.getName());
     var tx = db.createTx(
-        lf.TransactionType.READ_WRITE,
-        createJournal([table]));
+        lf.TransactionType.READ_WRITE, [table], createJournal([table]));
     var store = /** @type {!lf.backstore.ObjectStore} */ (
-        tx.getTable(table.getName(), table.deserializeRow.bind(table)));
+        tx.getTable(
+            table.getName(),
+            table.deserializeRow.bind(table),
+            lf.backstore.TableType.DATA));
     assertNotNull(store);
     asyncTestCase.continueTesting();
   });

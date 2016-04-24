@@ -23,11 +23,12 @@
 goog.setTestOnly();
 goog.require('goog.Promise');
 goog.require('goog.dom.iframe');
+goog.require('goog.html.testing');
 goog.require('goog.testing.AsyncTestCase');
 goog.require('goog.testing.jsunit');
+goog.require('lf.Capability');
 goog.require('lf.Row');
 goog.require('lf.backstore.LocalStorage');
-goog.require('lf.testing.Capability');
 goog.require('lf.testing.getSchemaBuilder');
 
 
@@ -44,7 +45,7 @@ var resolver;
 
 
 function setUp() {
-  if (!lf.testing.Capability.get().localStorageEvent) {
+  if (!lf.Capability.get().localStorageEvent) {
     return;
   }
 
@@ -70,7 +71,7 @@ function sampleHandler(diffs) {
 
 
 function testSubscribe() {
-  if (!lf.testing.Capability.get().localStorageEvent) {
+  if (!lf.Capability.get().localStorageEvent) {
     return;
   }
 
@@ -93,7 +94,7 @@ function testSubscribe() {
   // Workaround the case IE will fire events resulted from same tab.
   db.subscribe(sampleHandler);
 
-  var iframeContents =
+  var iframeContents = goog.html.testing.newSafeHtmlForTest(
       '<script>' +
       '  window.localStorage.setItem("mock_schema.tableC",' +
       '"{\\"1\\":{\\"id\\":\\"101\\",\\"name\\":\\"A101\\"},' +
@@ -102,7 +103,7 @@ function testSubscribe() {
       '\\"6\\":{\\"id\\":\\"104\\",\\"name\\":\\"D106\\"},' +
       '\\"7\\":{\\"id\\":\\"105\\",\\"name\\":\\"G107\\"},' +
       '\\"8\\":{\\"id\\":\\"106\\",\\"name\\":\\"H108\\"}}");' +
-      '</script>';
+      '</script>');
   goog.dom.iframe.createWithContent(
       /** @type {!HTMLBodyElement} */ (window.document.body),
       /* opt_headContents */ undefined,

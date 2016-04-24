@@ -21,6 +21,7 @@ goog.require('hr.db');
 goog.require('lf.op');
 goog.require('lf.proc.Relation');
 goog.require('lf.schema.DataStoreType');
+goog.require('lf.structs.set');
 goog.require('lf.testing.hrSchemaSampleData');
 goog.require('lf.tree');
 
@@ -56,6 +57,11 @@ function setUp() {
         j = db.getSchema().getJob();
         asyncTestCase.continueTesting();
       }, fail);
+}
+
+
+function tearDown() {
+  db.close();
 }
 
 
@@ -181,6 +187,27 @@ function testGetColumns() {
 }
 
 
+function testGetTables() {
+  var p1 = /** @type {!lf.pred.PredicateNode} */ (
+      lf.op.and(e.salary.gte(200), e.salary.lte(600)));
+  var expectedTables = [e];
+  assertSameElements(expectedTables, lf.structs.set.values(p1.getTables()));
+
+  var p2 = /** @type {!lf.pred.PredicateNode} */ (
+      lf.op.and(e.salary.gte(200), j.maxSalary.lte(600)));
+  expectedTables = [e, j];
+  assertSameElements(expectedTables, lf.structs.set.values(p2.getTables()));
+
+  var p3 = /** @type {!lf.pred.PredicateNode} */ (lf.op.and(
+      j.maxSalary.gte(200),
+      lf.op.and(
+          e.jobId.eq(j.id),
+          e.departmentId.eq(d.id))));
+  expectedTables = [e, j, d];
+  assertSameElements(expectedTables, lf.structs.set.values(p3.getTables()));
+}
+
+
 /**
  * Tests the setComplement() method for the case of an AND predicate.
  */
@@ -204,6 +231,52 @@ function testSetComplement_Or() {
 
   checkSetComplement(
       predicate, 8, expectedSalariesOriginal, expectedSalariesComplement);
+}
+
+
+function testIsKeyRangeCompatbile_And() {
+  var predicate = lf.op.and(e.salary.gte(200), e.salary.lte(600));
+  assertFalse(predicate.isKeyRangeCompatible());
+}
+
+
+function testIsKeyRangeCompatbile_Or() {
+  var keyRangeCompatbilePredicates = [
+    lf.op.or(e.salary.eq(200), e.salary.eq(600)),
+    lf.op.or(e.salary.lte(200), e.salary.gte(600)),
+    lf.op.or(e.salary.eq(200))
+  ];
+  keyRangeCompatbilePredicates.forEach(function(p) {
+    assertTrue(p.isKeyRangeCompatible());
+  });
+
+  var notKeyRangeCompatbilePredicates = [
+    lf.op.or(e.firstName.match(/Foo/), e.firstName.eq('Bar')),
+    lf.op.or(e.firstName.neq('Foo'), e.firstName.eq('Bar')),
+    lf.op.or(e.salary.eq(100), lf.op.or(e.salary.eq(200), e.salary.eq(300))),
+    lf.op.or(e.salary.isNull(), e.salary.eq(600)),
+    lf.op.or(e.firstName.eq('Foo'), e.lastName.eq('Bar'))
+  ];
+  notKeyRangeCompatbilePredicates.forEach(function(p) {
+    assertFalse(p.isKeyRangeCompatible());
+  });
+}
+
+
+function testToKeyRange_Or() {
+  var testCases = [
+    [lf.op.or(e.salary.eq(200), e.salary.eq(600)), '[200, 200],[600, 600]'],
+    [lf.op.or(e.salary.lte(200), e.salary.gte(600)),
+     '[unbound, 200],[600, unbound]'],
+    [lf.op.or(e.salary.lt(200), e.salary.lt(100)), '[unbound, 200)'],
+    [lf.op.or(e.salary.eq(200), e.salary.eq(200)), '[200, 200]']
+  ];
+
+  testCases.forEach(function(testCase) {
+    var predicate = testCase[0];
+    var expected = testCase[1];
+    assertEquals(expected, predicate.toKeyRange().toString());
+  });
 }
 
 

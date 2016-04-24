@@ -14,18 +14,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
-/**
- * The entry point of the application.
- */
-function main() {
-  var app = angular.module('lovefield-dashboard', []);
-  app.service('LovefieldService', LovefieldService);
-  app.service('SyncService', SyncService);
-  app.controller(
-      'DashboardController',
-      ['$scope', 'SyncService', 'LovefieldService', DashboardController]);
-}
-
-main();
+chrome.devtools.panels.create(
+    'Lovefield Inspector',
+    null,
+    'panel.html',
+    function(panel) {
+      // code invoked on panel creation
+    }
+);

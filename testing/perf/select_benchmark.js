@@ -80,6 +80,7 @@ lf.testing.perf.SelectBenchmark.EPSILON_ = Math.pow(10, -9);
 /**
  * @typedef {{
 *    employeeId: string,
+*    employeeIds: !Array<string>,
 *    employeeEmail: string,
 *    employeeHireDateStart: !Date,
 *    employeeHireDateEnd: !Date,
@@ -113,6 +114,18 @@ lf.testing.perf.SelectBenchmark.prototype.generateQueryData_ = function() {
   queryData.employeeEmail =
       sampleEmployees[employeeEmailIndex].getEmail();
 
+  // Randomly select an employee somewhere in the first half.
+  var employeeIndex1 =
+      Math.floor(Math.random() * (sampleEmployees.length / 2));
+  // Randomly select an employee somewhere in the second half.
+  var employeeIndex2 = Math.floor(
+          (sampleEmployees.length / 2) +
+          Math.random() * (sampleEmployees.length / 2));
+  queryData.employeeIds = [
+    sampleEmployees[employeeIndex1].getId(),
+    sampleEmployees[Math.floor((employeeIndex1 + employeeIndex2) / 2)].getId(),
+    sampleEmployees[employeeIndex2].getId()
+  ];
 
   queryData.employeeSalariesSpacedOut = [];
   queryData.employeeHireDatesSpacedOut = [];
@@ -204,7 +217,9 @@ lf.testing.perf.SelectBenchmark.prototype.tearDown = function() {
   return tx.exec([
     this.db_.delete().from(this.e_),
     this.db_.delete().from(this.j_)
-  ]);
+  ]).then(function() {
+    this.db_.close();
+  }.bind(this));
 };
 
 
@@ -451,6 +466,93 @@ lf.testing.perf.SelectBenchmark.prototype.verifyMultiRowNonIndexedRange =
   }, this);
 
   return goog.Promise.resolve(validated);
+};
+
+
+/**
+ * Case where an OR predicate involving a single (indexed) column exists.
+ * @return {!IThenable}
+ */
+lf.testing.perf.SelectBenchmark.prototype.queryIndexedOrPredicate =
+    function() {
+  var predicates = this.queryData_.employeeIds.map(function(employeeId) {
+    return this.e_['id'].eq(employeeId);
+  }, this);
+
+  return this.db_.
+      select().
+      from(this.e_).
+      where(lf.op.or.apply(null, predicates)).
+      exec();
+};
+
+
+/**
+ * Case where an OR predicate involving multiple columns exists and each column
+ * has a dedicated index.
+ * @return {!IThenable}
+ */
+lf.testing.perf.SelectBenchmark.prototype.queryIndexedOrPredicateMultiColumn =
+    function() {
+  var targetSalary1 = this.queryData_.employeeSalaryStart;
+  var targetSalary2 = this.queryData_.employeeSalaryEnd;
+  var targetId = this.queryData_.employeeId;
+
+  return this.db_.
+      select().
+      from(this.e_).
+      where(lf.op.or(
+          this.e_['id'].eq(targetId),
+          this.e_['salary']['in']([targetSalary1, targetSalary2]))).
+      exec();
+};
+
+
+/**
+ * @param {!Array<!Object>} results
+ * @return {!IThenable<boolean>}
+ */
+lf.testing.perf.SelectBenchmark.prototype.verifyIndexedOrPredicateMultiColumn =
+    function(results) {
+  assertTrue(results.length >= 2);
+
+  var targetSalary1 = this.queryData_.employeeSalaryStart;
+  var targetSalary2 = this.queryData_.employeeSalaryEnd;
+  var targetId = this.queryData_.employeeId;
+
+  var validated = results.every(function(obj) {
+    return obj['id'] == targetId || obj['salary'] == targetSalary1 ||
+        obj['salary'] == targetSalary2;
+  });
+  return goog.Promise.resolve(validated);
+};
+
+
+/** @return {!IThenable} */
+lf.testing.perf.SelectBenchmark.prototype.queryIndexedInPredicate =
+    function() {
+  return this.db_.
+      select().
+      from(this.e_).
+      // TODO(dpapad): Figure out how to please the linter, complaining about
+      // 'in'.
+      where(this.e_['id']['in'](this.queryData_.employeeIds)).
+      exec();
+};
+
+
+/**
+ * @param {!Array<!Object>} results
+ * @return {!IThenable<boolean>}
+ */
+lf.testing.perf.SelectBenchmark.prototype.verifyIndexedOrPredicate =
+    function(results) {
+  assertEquals(this.queryData_.employeeIds.length, results.length);
+  var actualIds = results.map(function(obj) {
+    return obj[this.e_['id'].getName()];
+  }, this);
+  assertSameElements(this.queryData_.employeeIds, actualIds);
+  return goog.Promise.resolve(true);
 };
 
 
@@ -781,76 +883,60 @@ lf.testing.perf.SelectBenchmark.prototype.verifyCountStar = function(results) {
 /** @override */
 lf.testing.perf.SelectBenchmark.prototype.getTestCases = function() {
   // TODO(dpapad): Convert all other methods to private.
-  return [
-    new lf.testing.perf.TestCase(
-        'SelectSingleRowIndexed',
-        this.querySingleRowIndexed.bind(this),
-        this.verifySingleRowIndexed.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectSingleRowNonIndexed',
-        this.querySingleRowNonIndexed.bind(this),
-        this.verifySingleRowNonIndexed.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectSingleRowMultipleIndices',
-        this.querySingleRowMultipleIndices.bind(this),
-        this.verifySingleRowMultipleIndices.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectMultiRowIndexedRange',
-        this.queryMultiRowIndexedRange.bind(this),
-        this.verifyMultiRowIndexedRange.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectMultiRowIndexedSpacedOut',
-        this.queryMultiRowIndexedSpacedOut.bind(this),
-        this.verifyMultiRowIndexedSpacedOut.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectMultiRowNonIndexedRange',
-        this.queryMultiRowNonIndexedRange.bind(this),
-        this.verifyMultiRowNonIndexedRange.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectMultiRowNonIndexedSpacedOut',
-        this.queryMultiRowNonIndexedSpacedOut.bind(this),
-        this.verifyMultiRowNonIndexedSpacedOut.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectOrderByIndexed',
-        this.queryOrderByIndexed.bind(this),
-        this.verifyOrderByIndexed.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectOrderByNonIndexed',
-        this.queryOrderByNonIndexed.bind(this),
-        this.verifyOrderByNonIndexed.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectOrderByIndexedCrossColumn',
-        this.queryOrderByIndexedCrossColumn.bind(this),
-        this.verifyOrderByIndexedCrossColumn.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectLimitSkipIndexed',
-        this.queryLimitSkipIndexed.bind(this),
-        this.verifyLimitSkipIndexed.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectProjectNonAggregatedColumns',
-        this.queryProjectNonAggregatedColumns.bind(this),
-        this.verifyProjectNonAggregatedColumns.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectProjectAggregateIndexed',
-        this.queryProjectAggregateIndexed.bind(this),
-        this.verifyProjectAggregateIndexed.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectProjectAggregateNonIndexed',
-        this.queryProjectAggregateNonIndexed.bind(this),
-        this.verifyProjectAggregateNonIndexed.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectJoinEqui',
-        this.queryJoinEqui.bind(this),
-        this.verifyJoinEqui.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectJoinTheta',
-        this.queryJoinTheta.bind(this),
-        this.verifyJoinTheta.bind(this)),
-    new lf.testing.perf.TestCase(
-        'SelectCountStar',
-        this.queryCountStar.bind(this),
-        this.verifyCountStar.bind(this))
+  var testCases = [
+    ['SingleRowIndexed',
+     this.querySingleRowIndexed, this.verifySingleRowIndexed],
+    ['SingleRowNonIndexed',
+     this.querySingleRowNonIndexed, this.verifySingleRowNonIndexed],
+    ['SingleRowMultipleIndices',
+     this.querySingleRowMultipleIndices, this.verifySingleRowMultipleIndices],
+    ['MultiRowIndexedRange',
+     this.queryMultiRowIndexedRange, this.verifyMultiRowIndexedRange],
+    ['MultiRowIndexedSpacedOut',
+     this.queryMultiRowIndexedSpacedOut, this.verifyMultiRowIndexedSpacedOut],
+    ['MultiRowNonIndexedRange',
+     this.queryMultiRowNonIndexedRange, this.verifyMultiRowNonIndexedRange],
+    ['MultiRowNonIndexedSpacedOut',
+     this.queryMultiRowNonIndexedSpacedOut,
+     this.verifyMultiRowNonIndexedSpacedOut],
+    ['IndexedOrPredicate',
+      this.queryIndexedOrPredicate,
+      this.verifyIndexedOrPredicate],
+    ['IndexedOrPredicateMultiColumn',
+      this.queryIndexedOrPredicateMultiColumn,
+      this.verifyIndexedOrPredicateMultiColumn],
+    ['IndexedInPredicate',
+      this.queryIndexedInPredicate,
+      // Intentionally using the same verification method as with the OR case.
+      this.verifyIndexedOrPredicate],
+    ['OrderByIndexed', this.queryOrderByIndexed, this.verifyOrderByIndexed],
+    ['OrderByNonIndexed',
+     this.queryOrderByNonIndexed, this.verifyOrderByNonIndexed],
+    ['OrderByIndexedCrossColumn',
+      this.queryOrderByIndexedCrossColumn,
+      this.verifyOrderByIndexedCrossColumn],
+    ['LimitSkipIndexed',
+     this.queryLimitSkipIndexed, this.verifyLimitSkipIndexed],
+    ['ProjectNonAggregatedColumns',
+      this.queryProjectNonAggregatedColumns,
+      this.verifyProjectNonAggregatedColumns],
+    ['ProjectAggregateIndexed',
+      this.queryProjectAggregateIndexed,
+      this.verifyProjectAggregateIndexed],
+    ['ProjectAggregateNonIndexed',
+      this.queryProjectAggregateNonIndexed,
+      this.verifyProjectAggregateNonIndexed],
+    ['JoinEqui', this.queryJoinEqui, this.verifyJoinEqui],
+    ['JoinTheta', this.queryJoinTheta, this.verifyJoinTheta],
+    ['CountStar', this.queryCountStar, this.verifyCountStar]
   ];
+
+  return testCases.map(function(testCase) {
+    var testCaseName = testCase[0];
+    var queryFn = testCase[1].bind(this);
+    var verifyFn = testCase[2].bind(this);
+    return new lf.testing.perf.TestCase(testCaseName, queryFn, verifyFn);
+  }, this);
 };
 
 

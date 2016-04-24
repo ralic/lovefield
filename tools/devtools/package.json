@@ -1,0 +1,10 @@
+{
+  "name": "lovefield-inspector",
+  "version": "0.0.1",
+  "description": "Lovefield DB inspector Chrome Extension",
+  "main": "devtools.js",
+  "devDependencies": {
+    "gulp-zip": "^3.0.2",
+    "jquery": "^2.1.4"
+  }
+}

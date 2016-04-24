@@ -7,8 +7,7 @@ table:
     column:
       id: string
       name: string
+      proto: object
     constraint:
       nullable: [name]
-    index:
-      idxName:
-        column: [id, name]  # Should throw: cross-column index on nullable
+      primaryKey: [id, name]

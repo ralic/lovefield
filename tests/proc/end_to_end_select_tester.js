@@ -60,6 +60,9 @@ lf.testing.EndToEndSelectTester = function(connectFn) {
   /** @private {!lf.schema.Table} */
   this.l_;
 
+  /** @private {!lf.schema.Table} */
+  this.cct_;
+
   /** @private {!lf.testing.hrSchema.MockDataGenerator} */
   this.dataGenerator_;
 
@@ -75,6 +78,7 @@ lf.testing.EndToEndSelectTester = function(connectFn) {
     this.testSkipIndex.bind(this),
     this.testSkipIndexZero.bind(this),
     this.testPredicate.bind(this),
+    this.testPredicate_IsNull.bind(this),
     this.testAs.bind(this),
     this.testColumnFiltering.bind(this),
     this.testImplicitJoin.bind(this),
@@ -85,8 +89,12 @@ lf.testing.EndToEndSelectTester = function(connectFn) {
     this.testMultiJoin_Explicit.bind(this),
     this.testPredicate_VarArgAnd.bind(this),
     this.testPredicate_VarArgOr.bind(this),
+    this.testCrossColumnNullable_PartialMatch.bind(this),
+    this.testCrossColumnNullable_FullMatch.bind(this),
     this.testExplicitJoin.bind(this),
     this.testOuterJoin.bind(this),
+    this.testOuterJoinWithWhere.bind(this),
+    this.testOuterMultiJoinWithWhere.bind(this),
     this.testOuterInnerJoin.bind(this),
     this.testInnerOuterJoin.bind(this),
     this.testOuterJoin_reversePredicate.bind(this),
@@ -150,6 +158,7 @@ lf.testing.EndToEndSelectTester.prototype.setUp_ = function() {
         this.c_ = db.getSchema().table('Country');
         this.r_ = db.getSchema().table('Region');
         this.l_ = db.getSchema().table('Location');
+        this.cct_ = db.getSchema().table('CrossColumnTable');
         return this.addSampleData_();
       }.bind(this));
 };
@@ -165,9 +174,9 @@ lf.testing.EndToEndSelectTester.prototype.addSampleData_ = function() {
       /* employeeCount */ 300,
       /* departmentCount */ 10);
 
-  var r = this.db_.getSchema().table('Region');
-  var c = this.db_.getSchema().table('Country');
-  var l = this.db_.getSchema().table('Location');
+  var r = this.r_;
+  var c = this.c_;
+  var l = this.l_;
 
   return this.db_.createTransaction().exec([
     this.db_.insert().into(r).values(this.dataGenerator_.sampleRegions),
@@ -177,7 +186,37 @@ lf.testing.EndToEndSelectTester.prototype.addSampleData_ = function() {
         this.dataGenerator_.sampleDepartments),
     this.db_.insert().into(this.j_).values(this.dataGenerator_.sampleJobs),
     this.db_.insert().into(this.e_).values(this.dataGenerator_.sampleEmployees),
+    this.db_.insert().into(this.cct_).values(this.getSampleCrossColumnTable_())
   ]);
+};
+
+
+/**
+ * Sample rows for the CrossColumnTable, which contains a nullable cross-column
+ * index.
+ * @return {!Array<!lf.Row>}
+ * @private
+ */
+lf.testing.EndToEndSelectTester.prototype.getSampleCrossColumnTable_ =
+    function() {
+  var sampleRows = new Array(20);
+  var padZeros = function(n) {
+    return (n < 10) ? ('0' + n) : n;
+  };
+
+  for (var i = 0; i < 20; i++) {
+    sampleRows[i] = this.cct_.createRow({
+      integer1: i,
+      integer2: i * 10,
+      // Generating a null value for i = [10, 12, 14].
+      string1: (i % 2 == 0 && i >= 10 && i < 15) ?
+          null : ('string1_' + padZeros(i)),
+      // Generating a null value for i = 16 and 18.
+      string2: (i % 2 == 0 && i >= 15) ?
+          null : ('string2_' + (i * 10).toString())
+    });
+  }
+  return sampleRows;
 };
 
 
@@ -368,6 +407,89 @@ lf.testing.EndToEndSelectTester.prototype.testPredicate = function() {
       function(results) {
         assertEquals(1, results.length);
         assertEquals(targetId, results[0].id);
+      });
+};
+
+
+/** @return {!IThenable} */
+lf.testing.EndToEndSelectTester.prototype.testPredicate_IsNull =
+    function() {
+  var queryBuilder = /** @type {!lf.query.SelectBuilder} */ (this.db_.
+      select().
+      from(this.cct_).
+      where(this.cct_['string1'].isNull()));
+
+  // TODO(dpapad): Currently isNull() predicates do not leverage indices.
+  // Reverse the assertion below once addressed.
+  var plan = queryBuilder.explain();
+  assertFalse(plan.indexOf(
+      'index_range_scan(CrossColumnTable.idx_crossNull') != -1);
+
+  return queryBuilder.exec().then(
+      function(results) {
+        assertSameElements(
+            [10, 12, 14],
+            results.map(function(obj) { return obj['integer1'] }));
+      });
+};
+
+
+/**
+ * Tests the case where a cross-column nullable index is being used, even though
+ * the predicates only bind the first indexed column, but not the 2nd indexed
+ * column.
+ * @return {!IThenable}
+ */
+lf.testing.EndToEndSelectTester.prototype.testCrossColumnNullable_PartialMatch =
+    function() {
+  var targetValue = 'string1_09';
+  var queryBuilder = /** @type {!lf.query.SelectBuilder} */ (this.db_.
+      select().
+      from(this.cct_).
+      where(this.cct_['string1'].gt(targetValue)));
+
+  // Ensure that cross-column nullable index is being used.
+  var plan = queryBuilder.explain();
+  assertTrue(plan.indexOf(
+      'index_range_scan(CrossColumnTable.idx_crossNull') != -1);
+
+  return queryBuilder.exec().then(
+      function(results) {
+        // Rows with integer1 value of 14, 16 and 18 have string1 value of null,
+        // so should not appear in the results.
+        assertSameElements(
+            [11, 13, 15, 16, 17, 18, 19],
+            results.map(function(obj) { return obj['integer1'] }));
+      });
+};
+
+
+/**
+ * Tests the case where a cross-column nullable index is being used and both
+ * indexed columns are bound by predicates.
+ * @return {!IThenable}
+ */
+lf.testing.EndToEndSelectTester.prototype.testCrossColumnNullable_FullMatch =
+    function() {
+  var targetString1 = 'string1_08';
+  var targetString2 = 'string2_80';
+  var queryBuilder = /** @type {!lf.query.SelectBuilder} */ (this.db_.
+      select().
+      from(this.cct_).
+      where(lf.op.and(
+          this.cct_['string1'].eq(targetString1),
+          this.cct_['string2'].eq(targetString2))));
+
+  // Ensure that cross-column nullable index is being used.
+  var plan = queryBuilder.explain();
+  assertTrue(plan.indexOf(
+      'index_range_scan(CrossColumnTable.idx_crossNull') != -1);
+
+  return queryBuilder.exec().then(
+      function(results) {
+        assertSameElements(
+            [8],
+            results.map(function(obj) { return obj['integer1'] }));
       });
 };
 
@@ -824,6 +946,60 @@ lf.testing.EndToEndSelectTester.prototype.testOuterJoin = function() {
   return queryBuilder.exec().then(
       function(results) {
         this.assertOuterJoinResult_(r, c, results);
+      }.bind(this));
+};
+
+
+/**
+ * Tests a SELECT query with an outer join and a where clause. It ensures that
+ * the where clause is applied on the result of the join (and not before the
+ * join has been calculated).
+ * @return {!IThenable}
+ */
+lf.testing.EndToEndSelectTester.prototype.testOuterJoinWithWhere = function() {
+  var c = this.c_;
+  var r = this.r_;
+  var countryId = 2;
+  var queryBuilder = /** @type {!lf.query.SelectBuilder} */ (
+      this.db_.select().
+      from(r).
+      leftOuterJoin(c, r.id.eq(c.regionId)).
+      orderBy(r.id, lf.Order.ASC).
+      where(c.id.eq(countryId)));
+
+  return queryBuilder.exec().then(
+      function(results) {
+        assertEquals(1, results.length);
+        assertEquals(countryId, results[0][c.getName()][c.id.getName()]);
+        assertNotNull(results[0][r.getName()]);
+        assertEquals(
+            results[0][c.getName()][c.regionId.getName()],
+            results[0][r.getName()][r.id.getName()]);
+      }.bind(this));
+};
+
+
+/**
+ * Tests a query with two outer joins and a composite where clause.
+ * @return {!IThenable}
+ */
+lf.testing.EndToEndSelectTester.prototype.testOuterMultiJoinWithWhere =
+    function() {
+  var d = this.d_;
+  var e = this.e_;
+  var j = this.j_;
+  var queryBuilder = /** @type {!lf.query.SelectBuilder} */ (
+      this.db_.select().
+      from(e).
+      leftOuterJoin(j, e.jobId.eq(j.id)).
+      leftOuterJoin(d, e.departmentId.eq(d.id)).
+      where(lf.op.and(j.id.isNull(), d.id.isNull())));
+
+  return queryBuilder.exec().then(
+      function(results) {
+        // Since every employee corresponds to an existing jobId and
+        // departmentId expecting an empty result.
+        assertEquals(0, results.length);
       }.bind(this));
 };
 

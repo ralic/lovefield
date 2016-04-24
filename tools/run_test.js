@@ -28,10 +28,9 @@ var chalk = /** @type {{green: !Function, red: !Function}} */ (
     require('chalk'));
 var pathMod = require('path');
 
-var JsUnitTestRunner = require('./jsunit_test_runner.js').JsUnitTestRunner;
-var webdriver = /** @type {{Capabilities: !Function, Builder: !Function}} */ (
-    require('selenium-webdriver'));
-var EXCLUDE_TESTS = require('./setup_tests.js').EXCLUDE_TESTS;
+var JsUnitTestRunner = /** @type {{runMany: !Function}} */ (
+    require('./jsunit_test_runner.js').JsUnitTestRunner);
+var webdriver = /** @type {!WebDriver} */ (require('selenium-webdriver'));
 
 
 
@@ -59,8 +58,8 @@ function runSpacTests() {
 
 /**
  * Runs tests in a browser context.
- * @param {?string} testPrefix Only tests that match the prefix will be
- *     returned. If null, all tests will run.
+ * @param {?string|?Array<string>} testPrefix Only tests that match the prefix
+ *     will be returned. If null, all tests will run.
  * @param {string} browser The browser to run the unit tests on.
  * @param {string} testsFolder The tests that contains all the test to be run.
  * @return {!IThenable}
@@ -76,26 +75,21 @@ function runBrowserTests(testPrefix, browser, testsFolder) {
   var driver = getWebDriver(browser);
 
   return new Promise(function(resolve, reject) {
-    var startupWaitInterval = 8 * 1000;
-    log(
-        'Waiting', startupWaitInterval,
-        'ms for the browser to get ready.');
-    setTimeout(function() {
-      /** @type {{runMany: !Function}} */ (
-          JsUnitTestRunner).runMany(driver, testUrls).then(
+    driver.getSession().then(function() {
+      JsUnitTestRunner.runMany(browser, driver, testUrls).then(
           function(results) {
             var res = function() { resolve(results); };
             driver.quit().then(res, res);
           }, reject);
-    }, startupWaitInterval);
+    }, reject);
   });
 }
 
 
 /**
  * Runs JSUnit tests.
- * @param {?string} testPrefix Only tests that match the prefix will be
- *     returned. If null, all tests will run.
+ * @param {?string|?Array<string>} testPrefix Only tests that match the prefix
+ *     will be returned. If null, all tests will run.
  * @param {string} browser The browser to run the unit tests on.
  * @return {!IThenable}
  */
@@ -127,25 +121,44 @@ function runJsPerfTests(browser) {
 
 /**
  * @param {string} testFolder The folder where the tests reside.
- * @param {?string} testPrefix Only tests that match the prefix will be
- *     returned. If null, all tests will run.
+ * @param {?string|?Array<string>} testPrefix Only tests that match the prefix
+ *     will be returned. If null, all tests will run.
  * @return {!Array<string>} A list of all matching testing URLs.
  */
 function getTestUrls(testFolder, testPrefix) {
-  var relativeTestUrls = glob.sync(testFolder + '/**/*_test.js').filter(
-      function(filename) {
-        return EXCLUDE_TESTS.indexOf(filename) == -1;
-      }).map(
-      function(filename) {
+  var prefixes = testPrefix ?
+      (typeof(testPrefix) == 'string' ? [testPrefix] : testPrefix) :
+      [];
+  var positivePatterns = [];
+  var negativePatterns = [];
+  prefixes.forEach(function(pattern) {
+    if (pattern.substring(0, 1) != '-') {
+      positivePatterns.push(pattern);
+    } else {
+      negativePatterns.push(pattern.slice(1));
+    }
+  });
+
+  var hasPattern = function(fileName, patterns) {
+    return patterns.some(function(pattern) {
+      return fileName.indexOf(pattern) != -1;
+    });
+  };
+
+  var relativeTestUrls = glob.sync(testFolder + '/**/*_test.js').map(
+      function(fileName) {
         var prefixLength = testFolder.length + 1;
-        return filename.substr(prefixLength);
+        return fileName.substr(prefixLength);
       }).filter(
-      function(filename) {
-        return testPrefix == null ?
-            true : (filename.indexOf(testPrefix) != -1);
+      function(fileName) {
+        var hasPositivePattern = positivePatterns.length == 0 ||
+            hasPattern(fileName, positivePatterns);
+        var hasNegativePattern = hasPattern(fileName, negativePatterns);
+        return testPrefix == null ? true :
+            (hasPositivePattern && !hasNegativePattern);
       }).map(
-      function(filename) {
-        return filename.replace(/\.js$/, '.html');
+      function(fileName) {
+        return fileName.replace(/\.js$/, '.html');
       });
 
   return relativeTestUrls.map(
@@ -156,31 +169,75 @@ function getTestUrls(testFolder, testPrefix) {
 
 
 /**
+ * TODO(arthurhsu): Safari will timeout when called. Need investigation.
+ * @param {string} browser
+ * @return {!WebDriver}
+ */
+function getRemoteWebDriver(browser) {
+  var builder = /** @type {!WebDriverBuilder} */ (new webdriver.Builder());
+  builder.usingServer('http://' +
+      process.env['SAUCE_USERNAME'] + ':' + process.env['SAUCE_ACCESS_KEY'] +
+      '@ondemand.saucelabs.com:80/wd/hub');
+  builder.disableEnvironmentOverrides();
+
+  var caps = {
+    'name': browser + ' ' + (process.env['TRAVIS_JOB_NUMBER'] || 'pilot'),
+    'username': process.env['SAUCE_USERNAME'],
+    'accessKey': process.env['SAUCE_ACCESS_KEY'],
+    'tunnelIdentifier': process.env['TRAVIS_JOB_NUMBER'],
+    'maxDuration': 3600,
+    'loggingPrefs': {
+      'browser': 'ALL'
+    }
+  };
+  switch (browser) {
+    case 'chrome':
+      caps['browserName'] = 'chrome';
+      caps['platform'] = 'linux';
+      break;
+
+    case 'firefox':
+      caps['browserName'] = 'firefox';
+      caps['platform'] = 'linux';
+      break;
+
+    case 'safari':
+      caps['browserName'] = 'safari';
+      caps['platform'] = 'OS X 10.11';
+      caps['version'] = '9.0';
+      break;
+
+    case 'ie':
+      caps['browserName'] = 'internet explorer';
+      caps['platform'] = 'Windows 7';
+      caps['version'] = '11.0';
+      break;
+
+    default:
+      throw new Error('Unsupported browser');
+      break;
+  }
+
+  return builder.withCapabilities(caps).build();
+}
+
+
+/**
  * @param {string} browser
  * @return {!WebDriver}
  */
 function getWebDriver(browser) {
-  var capabilities = /** @type {!WebDriverCapabilities} */ (
-      new webdriver.Capabilities());
-  capabilities.set('browserName', browser);
-
-  var usingServer = false;
-
-  // Add Sauce credentials if they were set in the environment.
   if (process.env['SAUCE_USERNAME']) {
-    usingServer = true;
-    capabilities.set('name', 'Travis Job ' + process.env['TRAVIS_JOB_NUMBER']);
-    capabilities.set('username', process.env['SAUCE_USERNAME']);
-    capabilities.set('accessKey', process.env['SAUCE_ACCESS_KEY']);
-    capabilities.set('tunnel-identifier', process.env['TRAVIS_JOB_NUMBER']);
+    return getRemoteWebDriver(browser);
   }
+
+  var caps = /** @type {!WebDriverCapabilities} */ (
+      new webdriver.Capabilities());
+  caps.set('browserName', browser);
+  caps.set('loggingPrefs', { 'browser': 'ALL' });
 
   var builder = /** @type {!WebDriverBuilder} */ (new webdriver.Builder());
-  if (usingServer) {
-    builder.usingServer('http://' +
-        process.env['SAUCE_USERNAME'] + ':' + process.env['SAUCE_ACCESS_KEY'] +
-        '@ondemand.saucelabs.com:80/wd/hub');
-  }
+  builder.disableEnvironmentOverrides();
 
   if (browser == 'chrome') {
     var chromeOptions = /** @type {!ChromeOptions} */ (
@@ -190,14 +247,14 @@ function getWebDriver(browser) {
       '--no-first-run'
     ]);
 
-    return builder.withCapabilities(capabilities).
+    return builder.withCapabilities(caps).
         setChromeOptions(chromeOptions).
         build();
   } else if (browser == 'firefox') {
     var firefoxOptions = /** @type {!FirefoxOptions} */ (
         new firefoxMod.Options());
     firefoxOptions.setProfile(new firefoxMod.Profile());
-    return builder.withCapabilities(capabilities).
+    return builder.withCapabilities(caps).
         setFirefoxOptions(firefoxOptions).
         build();
   } else if (browser == 'safari') {
@@ -207,13 +264,13 @@ function getWebDriver(browser) {
     }
     var safariOptions = /** @type {!SafariOptions} */ (new safariMod.Options());
     safariOptions.setCleanSession();
-    return builder.withCapabilities(capabilities).
+    return builder.withCapabilities(caps).
         setSafariOptions(safariOptions).
         build();
   } else if (browser == 'ie') {
     var ieOptions = /** @type {!IeOptions} */ (new ieMod.Options());
     ieOptions.ensureCleanSession();
-    return builder.withCapabilities(capabilities).
+    return builder.withCapabilities(caps).
         setIeOptions(ieOptions).
         build();
   } else {

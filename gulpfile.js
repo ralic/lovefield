@@ -19,7 +19,7 @@ var gulp = /** @type {{
     src: !Function}} */ (require('gulp'));
 var gjslint = /** @type {!Function} */ (require('gulp-gjslint'));
 var pathMod = require('path');
-var chalk = /** @type {{green: !Function, red: !Function}} */ (
+var chalk = /** @type {{green: !Function, red: !Function, cyan: !Function}} */ (
     require('chalk'));
 var nopt = /** @type {!Function} */ (require('nopt'));
 
@@ -49,7 +49,7 @@ gulp.task('default', function() {
   log('Usage: ');
   log('  gulp build --target=lib --mode=<opt|debug>:');
   log('      Generate dist/lf.js using Closure compiler.');
-  log('  gulp build --target=tests --filter=<matching string>:');
+  log('  gulp build --target=tests --filter=<pattern>:');
   log('      Compile tests using Closure compiler.');
   log('  gulp debug [--target=<tests|perf>] [--port=<number>]:');
   log('      Start a debug server (default is test at port 8000)');
@@ -57,10 +57,11 @@ gulp.task('default', function() {
   log('  gulp test --target=spac: Run SPAC tests');
   log('  gulp test --target=perf [--browser=<target>]:');
   log('      Run perf tests using webdriver (need separate install).');
-  log('  gulp test --target=tests [--filter=<matching string> ' +
-      '--browser=<target>]:');
+  log('  gulp test --target=tests [--filter=<pattern> --browser=<target>]:');
   log('      Run unit tests using webdriver (need separate install).');
   log('      Currently, chrome|firefox|ie|safari are valid webdriver targets.');
+  log('      Can pass multiple browsers by repeating the --browser flag.');
+  log('      Can pass multiple filters by repeating the --filter flag.');
 });
 
 
@@ -78,7 +79,7 @@ gulp.task('lint', function() {
 
 gulp.task('build', function() {
   var knownOpts = {
-    'filter': [String, null],
+    'filter': [Array, String, null],
     'mode': [String, null],
     'target': [String]
   };
@@ -87,7 +88,10 @@ gulp.task('build', function() {
   if (options.target == 'lib') {
     return builder.buildLib(options);
   } else {
-    return builder.buildAllTests(options);
+    return builder.buildAllTests(options).then(function() {
+      log('Everything built');
+      process.exit(0);
+    });
   }
 });
 
@@ -113,12 +117,25 @@ gulp.task('debug', function() {
 
 gulp.task('test', ['debug'], function() {
   var knownOpts = {
-    'browser': [String, null],
-    'filter': [String, null],
+    'browser': [Array, String, null],
+    'filter': [Array, String, null],
     'target': [String]
   };
   var options = nopt(knownOpts);
-  options.browser = options.browser || 'chrome';
+  var browsers = options.browser instanceof Array ?
+      options.browser :
+      [options.browser || process.env['SELENIUM_BROWSER'] || 'chrome'];
+  /** @param {*=} opt_error */
+  var finalize = function(opt_error) {
+    testServer.stopServer();
+    var exitCode = 0;
+    if (opt_error) {
+      var message = opt_error.message || opt_error.toString();
+      log('Error detected:', message);
+      exitCode = 1;
+    }
+    process.exit(exitCode);
+  };
 
   var whenTestsDone = null;
   if (options.target == 'perf') {
@@ -126,26 +143,33 @@ gulp.task('test', ['debug'], function() {
     whenTestsDone = runner.runJsPerfTests(options.browser).then(
         function(perfData) {
           log(JSON.stringify(perfData, null, 2));
-          testServer.stopServer();
-          process.exit();
-        });
+          finalize();
+        }, finalize);
   } else if (options.target == 'spac') {
     // Run only SPAC.
     whenTestsDone = runner.runSpacTests();
   } else {
     // Run only JSUnit tests.
-    whenTestsDone =
-        runner.runJsUnitTests(options.filter, options.browser).then(
-            function(results) {
-              var failedCount = results.reduce(function(prev, item) {
-                return prev + (item['pass'] ? 0 : 1);
-              }, 0);
-              log(results.length + ' tests, ' + failedCount + ' failure(s).');
-              log('JSUnit tests: ', failedCount > 0 ? chalk.red('FAILED') :
-                  chalk.green('PASSED'));
-              testServer.stopServer();
-              process.exit(failedCount == 0 ? 0 : 1);
-            });
+    var testBrowser = function(browser) {
+      return runner.runJsUnitTests(options.filter, browser).then(
+          function(results) {
+            var failedCount = results.reduce(function(prev, item) {
+              return prev + (item['pass'] ? 0 : 1);
+            }, 0);
+            log(results.length + ' tests, ' + failedCount + ' failure(s).');
+            log('[ ' + chalk.cyan(browser) + ' ] JSUnit tests: ',
+                failedCount > 0 ? chalk.red('FAILED') : chalk.green('PASSED'));
+            if (failedCount > 0) {
+              throw new Error();
+            }
+          }, finalize);
+    };
+
+    var whenBrowsersDone = browsers.map(function(browser) {
+      return testBrowser(browser);
+    });
+    whenTestsDone = Promise.all(whenBrowsersDone).then(
+        function() { finalize(); }, finalize);
   }
   return whenTestsDone;
 });

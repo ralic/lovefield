@@ -10,7 +10,7 @@ DB version) uniquely identify a database instance. The database is stored in a
 
 Lovefield initialization is performed through [schema builder's `connect()`
 method](
-https://github.com/google/lovefield/blob/31f14db4995bb89fa053c99261a4b7501f87eb8d/lib/schema/builder.js#L91-109).
+https://github.com/google/lovefield/blob/31f14db4995bb89fa053c99261a4b7501f87eb8d/lib/schema/builder.js#L91-L109).
 The `connect()` method will implicitly invoke Lovefield initialization.
 It will do the following:
 
@@ -23,7 +23,8 @@ It will do the following:
 `connect()` shall be called only once each session. In rare circumstances,
 one can call `close()` on the opened connection first, then call `connect()`
 again. However, this is not guaranteed to work due to IndexedDB limitations,
-see [Data Store](02_data_store.md) for details.
+see [Data Store](02_data_store.md) for details. Calling `connect()` when an
+open connection exists will result in an exception.
 
 Users are free to connect to two or more databases simultaneously in the same
 session. Users shall not connect to the same database more than once in the same
@@ -58,6 +59,19 @@ The `storeType` property allows the user to specify what data store to use.
   data store. If this options is chosen, user *MUST* also supply property
   `firebase` to provide an already connected and authenticated Firebase
   instance. Field `firebase` will be ignored for all other data store types.
+
+* `lf.schema.DataStoreType.WEB_SQL`: uses browser-provided WebSQL as data store.
+  This is provided to work around issues on Safari and iOS Chrome, see
+  [Design Doc](../dd/02_data_store.md#25-websql-store) for details.
+
+If `storeType` is not defined, the following algorithm will be used to select
+a store type:
+
+* If browser supports IndexedDB, use `lf.schema.DataStoreType.INDEXED_DB`.
+* If browser does not support IndexedDB, but supports WebSQL, use
+  `lf.schema.DataStoreType.WEB_SQL`.
+* If neither IndexedDB nor WebSQL is supported, use
+  `lf.schema.DataStoreType.MEMORY`.
 
 ### 3.2 Multi-Process Connection
 
@@ -148,24 +162,25 @@ function onUpgrade(rawDb) {
   // This call is synchronous.
   rawDb.dropTable('Progress');
 
+  // All async upgrade helpers are supposed to chain one after another.
+
   // Add column agent (type string) to Purchase with default value 'Smith'.
-  var p1 = rawDb.addTableColumn('Purchase', 'agent', 'Smith');
+  return rawDb.addTableColumn('Purchase', 'agent', 'Smith').then(function() {
+    // Delete column metadata from Photo.
+    return rawDb.dropTableColumn('Photo', 'metadata');
+  }).then(function() {
+    // Rename Photo.isLocal to Photo.local.
+    return rawDb.renameTableColumn('Photo', 'isLocal', 'local');
+  }).then(function() {
+    // Transformations are not supported because of IndexedDB auto-commit:
+    // Firefox immediately commits the transaction when Lovefield tries to
+    // return a promise from scanning existing object stores. Users are
+    // supposed to do a dump and make the transformation outside of onUpgrade
+    // routine.
 
-  // Delete column metadata from Photo.
-  var p2 = rawDb.dropTableColumn('Photo', 'metadata');
-
-  // Rename Photo.isLocal to Photo.local.
-  var p3 = rawDb.renameTableColumn('Photo', 'isLocal', 'local');
-
-  // Transformations are not supported because of IndexedDB auto-commit: Firefox
-  // immediately commits the transaction when Lovefield tries to return a
-  // promise from scanning existing object stores. Users are supposed to do a
-  // dump and make the transformation outside of onUpgrade routine.
-
-  // DUMP the whole DB into a JS object.
-  var p4 = rawDb.dump();
-
-  return Promise.all([p1, p2, p3, p4]);
+    // DUMP the whole DB into a JS object.
+    return rawDb.dump();
+  });
 }
 ```
 
@@ -210,7 +225,7 @@ interface provides:
 Although the schema can be retrieved from schema builder, the suggested way of
 retrieving the database schema is to get them from `lf.Database#getSchema()`
 call, which will return an [`lf.schema.Database`](
-https://github.com/google/lovefield/blob/11e206f865b2782a0311bcc0abfd3a97acf68642/lib/schema/schema.js#L64-88)
+https://github.com/google/lovefield/blob/11e206f865b2782a0311bcc0abfd3a97acf68642/lib/schema/schema.js#L64-L88)
 object that represents the schema of that instance.
 
 The schema is used to support query building, such as providing filters and
@@ -226,7 +241,7 @@ following table list the components of it:
 #### 3.4.2 Query Builders and Transactions
 
 All query builders implement the interface [`lf.query.Builder`](
-https://github.com/google/lovefield/blob/0146b8c1a951ecc2cf282075e6653d63aac1aed9/lib/query.js#L28-62).
+https://github.com/google/lovefield/blob/0146b8c1a951ecc2cf282075e6653d63aac1aed9/lib/query.js#L28-L62).
 Their main responsibility is to generate query objects that will be accepted and
 executed by query execution engine. A query object can be reused multiple times
 if same query is desired.

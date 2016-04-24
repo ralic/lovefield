@@ -19,13 +19,12 @@ goog.require('goog.Promise');
 goog.require('goog.testing.AsyncTestCase');
 goog.require('goog.testing.jsunit');
 goog.require('hr.db');
+goog.require('lf.Capability');
 goog.require('lf.Row');
 goog.require('lf.TransactionType');
-goog.require('lf.cache.Journal');
+goog.require('lf.backstore.TableType');
 goog.require('lf.schema.DataStoreType');
 goog.require('lf.service');
-goog.require('lf.structs.set');
-goog.require('lf.testing.Capability');
 
 
 /** @type {!goog.testing.AsyncTestCase} */
@@ -37,12 +36,12 @@ var asyncTestCase =
 var db;
 
 
-/** @type {!lf.testing.Capability} */
+/** @type {!lf.Capability} */
 var capability;
 
 
 function setUp() {
-  capability = lf.testing.Capability.get();
+  capability = lf.Capability.get();
   asyncTestCase.waitForAsync('setUp');
   var options = {
     storeType: !capability.indexedDb ? lf.schema.DataStoreType.MEMORY :
@@ -110,12 +109,12 @@ function testConversions() {
   var selectWithoutCacheFn = function() {
     var backStore = /** @type {!lf.BackStore} */ (
         hr.db.getGlobal().getService(lf.service.BACK_STORE));
-    var tx = backStore.createTx(
-        lf.TransactionType.READ_ONLY,
-        new lf.cache.Journal(hr.db.getGlobal(),
-            lf.structs.set.create([tableSchema])));
+    var tx = backStore.createTx(lf.TransactionType.READ_ONLY, [tableSchema]);
     var store = /** @type {!lf.backstore.ObjectStore} */ (
-        tx.getTable(tableSchema.getName(), tableSchema.deserializeRow));
+        tx.getTable(
+            tableSchema.getName(),
+            tableSchema.deserializeRow,
+            lf.backstore.TableType.DATA));
     return store.get([]);
   };
 

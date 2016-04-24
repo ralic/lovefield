@@ -1,3 +1,98 @@
+Version: 2.1.7<br>
+Publish date: 20160307<br>
+Changes:
+ - Changed exception description URL to point to GitHub.
+
+Version: 2.1.6<br>
+Publish date: 20160204<br>
+Changes:
+ - Changed the algorithm of assigning auto-increment primary keys.
+ - Allowed isNull() and isNotNull() predicate for lf.Type.OBJECT columns.
+ - Fixed update queries incorrectly handling parameter binding.
+ - Fixed incorrect TypeScript definitions.
+
+Version: 2.1.5<br>
+Publish date: 20160107<br>
+Changes:
+ - Fixed WebSQL back store initial row ID scanning bug.
+
+Version: 2.1.4<br>
+Publish date: 20151222<br>
+Changes:
+ - Fixed PushDownSelectionsPass case where nodes were not pushed down (which was
+   affecting queries with multiple joins).
+ - Fixed Tyepescript definitions for TableBuilder#addForeignKey.
+
+Version: 2.1.3<br>
+Publish date: 20151216<br>
+Changes:
+ - Fixed execution of queries that involve leftOuterJoin and have a where clause
+   such that the result matches that of other SQL engines.
+ - Fixed error thrown by MultiColumnOrPass optimization if tree was already
+   optimized.
+ - Fixed ChangeRecord objects returned to observers to not be renamed by the
+   compiler.
+ - Fixed Typescript definitions for Builder#connect.
+
+Version: 2.1.2<br>
+Publish date: 20151120<br>
+Changes:
+- Fix inspector not showing some pages.
+- Fix TypeScript definition errors.
+- Fix a bug in lf.structs.MapSet#delete.
+- Fix WebSQL error when table name is a SQL reserved word.
+- Add transaction statistics.
+
+Version: 2.1.1<br>
+Publish date: 20151030<br>
+Changes:
+ - Add better debug inspector support that requires much less memory for the
+   inspector extension.
+
+Version: 2.1.0<br>
+Publish date: 20151026<br>
+Changes:
+ - OR and IN predicates will use index trees instead of full table scan when
+   possible.
+ - Continuous integration using Travis CI and Sauce Labs is now in place and
+   guarding all future submissions.
+ - Lovefield declares golden: all features in the specification are implemented,
+   unit-tested, and field-tested.
+
+Version: 2.0.66<br>
+Publish date: 20151014<br>
+Changes:
+ - Fix Firebase not listening to external changes for new instances.
+ - Intercepting database initialization failures to provide better error
+   message.
+
+Version: 2.0.65<br>
+Publish date: 20151009<br>
+Changes:
+ - Optimize the IN predicate to leverage indices.
+ - Optimize certain class of OR predicate to leverage indices.
+ - Fix cross-column index getRange() bug that caused some results to be missing.
+ - Fix Firebase backstore incorrect serialization.
+
+Changes:
+Version: 2.0.64<br>
+Publish date: 20151005<br>
+Changes:
+ - Implemented cascaded deletions/updates.
+ - Implemented cross-column nullable indices.
+ - Performance and memory improvements for READ_ONLY queries.
+ - Modified distributed binaries such that they can be imported as modules.
+ - Disable usage of native Map/Set for Safari or iOS Chrome.
+ - Fixed a bug in BTree#getRange() for the case of LIMIT and SKIP by index.
+ - Fixed a bug in BTree#getRange() for cross-column indices.
+ - Fixed a bug preventing persisted indices to be serialized correctly if
+   "bundled" mode is used.
+ - Expliticly disallowing multiple calls to connect(), to avoid misusage.
+ - Falling back to WEB_SQL or MEMORY data stores if no explicit data store type
+   is requested in `connectOptions` and INDEXED_DB is not available.
+ - Using the faster and experimental IDBObjectStore#getAll when available.
+ - Stop accidentally distributing the codelabs/ folder through bower.
+
 Version: 2.0.63<br>
 Publish date: 20150917<br>
 Changes:

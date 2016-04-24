@@ -30,10 +30,17 @@ goog.require('lf.service');
 goog.require('lf.structs.map');
 goog.require('lf.structs.set');
 goog.require('lf.testing.getSchemaBuilder');
+goog.require('lf.testing.util');
 
 
 /** @type {!goog.testing.AsyncTestCase} */
 var asyncTestCase = goog.testing.AsyncTestCase.createAndInstall('Firebase');
+
+
+// Firebase WebSocket timeout is 30 seconds, so make sure this timeout is
+// greater than that value, otherwise it can flake.
+/** @type {number} */
+asyncTestCase.stepTimeout = 40000;  // Raise the timeout to 40 seconds
 
 
 /** @type {!Firebase} */
@@ -60,14 +67,6 @@ var cache;
 var schema;
 
 
-/** @const {string} */
-var FB_URL = 'https://torrid-inferno-8867.firebaseIO.com/test';
-
-
-/** @const {string} */
-var FB_TOKEN = '';
-
-
 /** @type {boolean} */
 var manualMode;
 
@@ -76,8 +75,8 @@ var manualMode;
 function getFirebaseRef() {
   var resolver = goog.Promise.withResolver();
 
-  var ref = new Firebase(FB_URL);
-  ref.authWithCustomToken(FB_TOKEN, function(err, authData) {
+  var ref = new Firebase(window['FIREBASE_URL']);
+  ref.authWithCustomToken(window['FIREBASE_TOKEN'], function(err, authData) {
     if (err) {
       resolver.reject(err);
     } else {
@@ -111,6 +110,15 @@ function setUpPage() {
   });
 }
 
+function tearDown() {
+  manualMode = window['MANUAL_MODE'] || false;
+  if (!manualMode || !goog.isDefAndNotNull(fb)) {
+    return;
+  }
+
+  fb.child(schema.name()).remove();
+}
+
 function setUp() {
   if (!manualMode) {
     return;
@@ -119,7 +127,9 @@ function setUp() {
   asyncTestCase.waitForAsync('setUp');
 
   indexStore = new lf.index.MemoryIndexStore();
-  schema = lf.testing.getSchemaBuilder('mock_schema').getSchema();
+  var schemaName = 'msfb' + Date.now().toString() +
+      Math.floor(Math.random() * 1000).toString();
+  schema = lf.testing.getSchemaBuilder(schemaName).getSchema();
   cache = new lf.cache.DefaultCache(schema);
 
   global = lf.Global.get();
@@ -200,30 +210,33 @@ function testSCUD() {
 
   var journal = createJournal([t2]);
   journal.insertOrReplace(t2, [row0, row1]);
-  var tx = db.createTx(lf.TransactionType.READ_WRITE, journal);
+  var tx = db.createTx(lf.TransactionType.READ_WRITE, [t2.getName()], journal);
   tx.commit().then(function() {
     checkRows([row0, row1]);
     journal = createJournal([t2]);
     journal.update(t2, [new lf.Row(2, CONTENTS2)]);
-    tx = db.createTx(lf.TransactionType.READ_WRITE, journal);
+    tx = db.createTx(lf.TransactionType.READ_WRITE, [t2.getName()], journal);
     return tx.commit();
   }).then(function() {
     checkRows([row0, row2]);
     journal = createJournal([t2]);
     journal.remove(t2, [row0]);
-    tx = db.createTx(lf.TransactionType.READ_WRITE, journal);
+    tx = db.createTx(lf.TransactionType.READ_WRITE, [t2.getName()], journal);
     return tx.commit();
   }).then(function() {
     checkRows([row2]);
     journal = createJournal([t2]);
     journal.insert(t2, [row0]);
-    tx = db.createTx(lf.TransactionType.READ_WRITE, journal);
+    tx = db.createTx(lf.TransactionType.READ_WRITE, [t2.getName()], journal);
     return tx.commit();
   }).then(function() {
     checkRows([row0, row2]);
     journal = createJournal([t2]);
     journal.remove(t2, [row0, row2]);
-    tx = db.createTx(lf.TransactionType.READ_WRITE, journal);
+    tx = db.createTx(lf.TransactionType.READ_WRITE, [t2.getName()], journal);
+    return tx.commit();
+  }).then(function() {
+    tx = db.createTx(lf.TransactionType.READ_ONLY, [t2.getName()]);
     return tx.commit();
   }).then(function() {
     checkRows([]);
@@ -353,6 +366,58 @@ function testExternalChange() {
     return testDelete();
   }).then(function() {
     db.unsubscribe();
+    asyncTestCase.continueTesting();
+  });
+}
+
+function testReload() {
+  if (!manualMode) {
+    return;
+  }
+
+  asyncTestCase.waitForAsync('testReload');
+
+  // Remove the DB created by setUp because we don't need it.
+  fb.child(schema.name()).remove();
+
+  var mydb;
+  var options = {
+    storeType: lf.schema.DataStoreType.FIREBASE,
+    firebase: fb
+  };
+
+  var t;
+  var CONTENTS0 = {'id': 'hello0', 'name': 'world0'};
+  var CONTENTS1 = {'id': 'hello1', 'name': 'world1'};
+  var schemaName = 'msfb' + Date.now().toString() +
+      Math.floor(Math.random() * 1000).toString();
+  var builder = lf.testing.getSchemaBuilder(schemaName);
+  schema = builder.getSchema();  // So that it can be properly cleared.
+
+  builder.connect(options).then(function(database) {
+    mydb = database;
+    t = mydb.getSchema().table('tableA');
+    var row0 = t.createRow(CONTENTS0);
+    var row1 = t.createRow(CONTENTS1);
+    return mydb.insert().into(t).values([row0, row1]).exec();
+  }).then(function() {
+    return mydb.select().from(t).orderBy(t['id']).exec();
+  }).then(function(results) {
+    assertArrayEquals([CONTENTS0, CONTENTS1], results);
+    mydb.close();
+    t = null;
+    return lf.testing.getSchemaBuilder(schemaName).connect(options);
+  }).then(function(database2) {
+    assertTrue(database2 != mydb);
+    mydb = database2;
+    t = mydb.getSchema().table('tableA');
+    return mydb.select().from(t).exec();
+  }).then(function(results) {
+    assertEquals(2, results.length);
+    var row0 = t.createRow({'id': 'hello0', 'name': 'world0'});
+    var q = mydb.insert().into(t).values([row0]);
+    return lf.testing.util.assertThrowsErrorAsync(201, q.exec.bind(q));
+  }).then(function() {
     asyncTestCase.continueTesting();
   });
 }

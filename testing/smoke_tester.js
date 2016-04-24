@@ -20,9 +20,8 @@ goog.provide('lf.testing.SmokeTester');
 goog.require('goog.Promise');
 goog.require('goog.testing.jsunit');
 goog.require('lf.TransactionType');
-goog.require('lf.cache.Journal');
+goog.require('lf.backstore.TableType');
 goog.require('lf.service');
-goog.require('lf.structs.set');
 
 
 
@@ -34,9 +33,6 @@ goog.require('lf.structs.set');
  * @param {!lf.Database} db Must compatible with HR schema's Region table.
  */
 lf.testing.SmokeTester = function(global, db) {
-  /** @private {!lf.Global} */
-  this.global_ = global;
-
   /** @private {!lf.Database} */
   this.db_ = db;
 
@@ -233,6 +229,12 @@ lf.testing.SmokeTester.prototype.testTransaction = function() {
     return this.selectAll_();
   }, this)).then(function(results) {
     assertEquals(5, results.length);
+    var stats = tx.stats();
+    assertEquals(true, stats.success());
+    assertEquals(1, stats.changedTableCount());
+    assertEquals(5, stats.insertedRowCount());
+    assertEquals(0, stats.updatedRowCount());
+    assertEquals(0, stats.deletedRowCount());
 
     // Transaction shall not be able to be executed again after committed.
     var select = db.select().from(r);
@@ -306,8 +308,8 @@ lf.testing.SmokeTester.prototype.generateSampleRowsWithSamePrimaryKey_ =
  */
 lf.testing.SmokeTester.prototype.selectAll_ = function() {
   var r = this.r_;
-  var tx = this.backStore_.createTx(
-      lf.TransactionType.READ_ONLY,
-      new lf.cache.Journal(this.global_, lf.structs.set.create([r])));
-  return tx.getTable(r.getName(), goog.bind(r.deserializeRow, r)).get([]);
+  var tx = this.backStore_.createTx(lf.TransactionType.READ_ONLY, [r]);
+  return tx.getTable(
+      r.getName(), goog.bind(r.deserializeRow, r), lf.backstore.TableType.DATA).
+      get([]);
 };

@@ -43,8 +43,8 @@ var depsHelper = /** @type {{
         require(pathMod.resolve(__dirname + '/scan_deps.js')));
 var StripLicense = require(pathMod.resolve(
     pathMod.join(__dirname, '/strip_license.js'))).StripLicense;
-var sequentiallyRun = require(pathMod.resolve(
-    pathMod.join(__dirname, '/promise_util.js'))).sequentiallyRun;
+var batchRun = require(pathMod.resolve(
+    pathMod.join(__dirname, '/promise_util.js'))).batchRun;
 
 // Make linter happy
 var log = console['log'];
@@ -66,13 +66,14 @@ function buildLib(options) {
 
 
 /**
- * @param {string} testFile
+ * @param {string} testFilePath
  * @return {!IThenable}
  */
-function buildTest(testFile) {
+function buildTest(testFilePath) {
   // Some tests are built against the distritbuted lovefield.min.js and require
   // different setup.
-  if (testFile.indexOf('harness/min_js') != -1) {
+  var testFile = pathMod.normalize(testFilePath);
+  if (testFile.indexOf(pathMod.join('harness', 'min_js')) != -1) {
     return buildMinJsTest_(testFile);
   }
 
@@ -138,8 +139,12 @@ function buildAllTests(options) {
   var glob = /** @type {{sync:!Function}} */ (require('glob'));
   var testFiles = glob.sync('tests/**/*_test.js');
   if (options.filter) {
+    var filters = typeof(options.filter) == 'string' ? [options.filter] :
+        options.filter;
     testFiles = testFiles.filter(function(file) {
-      return file.indexOf(options.filter) != -1;
+      return filters.some(function(filter) {
+        return file.indexOf(filter) != -1;
+      });
     });
   }
 
@@ -150,15 +155,12 @@ function buildAllTests(options) {
     };
   });
 
-  var counter = 0;
-  var onStart = function(functionItem) {
-    counter++;
-    log(
-        'Building...', counter, 'of',
-        functionItems.length, functionItem.name);
+  var total = functionItems.length;
+  var maxRunners = process.env['CONCURRENT_BUILDER'] || 8;
+  var onStart = function(functionItem, index) {
+    log('Building...', index + 1, 'of', total, functionItem.name);
   };
-  return sequentiallyRun(functionItems, onStart);
-
+  return batchRun(functionItems, maxRunners, onStart);
 }
 
 

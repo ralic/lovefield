@@ -129,6 +129,8 @@ ApiTester.prototype.run = function() {
 
     this.testApi_Table();
     this.testApi_Column();
+
+    return this.testApi_ChangeRecord();
   }.bind(this));
 };
 
@@ -262,10 +264,23 @@ ApiTester.prototype.testApi_Schema = function() {
 };
 
 
+/** Tests transaction stats API */
+ApiTester.prototype.testApi_TransactionStats = function() {
+  var methodNames = [
+    'success', 'insertedRowCount', 'updatedRowCount', 'deletedRowCount',
+    'changedTableCount'
+  ];
+
+  var tx = this.db_.createTransaction();
+  tx.commit();
+  assertMethods(tx.stats(), methodNames, 'lf.TransactionStats');
+};
+
+
 /** Tests transaction API */
 ApiTester.prototype.testApi_Transaction = function() {
   var methodNames = [
-    'exec', 'begin', 'attach', 'commit', 'rollback'
+    'exec', 'begin', 'attach', 'commit', 'rollback', 'stats'
   ];
 
   var tx = this.db_.createTransaction();
@@ -337,10 +352,40 @@ ApiTester.prototype.testApi_Column = function() {
 
 
 /**
+ * Tests the plain ChangeRecord object passed to observers.
+ * @return {!IThenable}
+ */
+ApiTester.prototype.testApi_ChangeRecord = function() {
+  return new Promise(function(resolve, reject) {
+    var q = this.db_.select().from(this.table_);
+    this.db_.observe(q, function(changes) {
+      assertAttributes(
+          changes[0],
+          ['addedCount', 'index', 'object', 'removed', 'type'],
+          'ChangeRecord');
+      resolve();
+    });
+
+    var row = this.table_.createRow();
+    this.db_.insert().into(this.table_).values([row]).exec();
+  }.bind(this));
+};
+
+
+/**
  * Tests lf.raw.BackStore API.
  * @return {!IThenable}
  */
 ApiTester.prototype.testApi_RawBackStore = function() {
+  // Check Safari and iOS WebView
+  var userAgent = navigator.userAgent;
+  if (userAgent.indexOf('Safari') != -1 &&
+      (userAgent.indexOf('Chrome') == -1 ||
+       userAgent.indexOf('iPhone') != -1 ||
+       userAgent.indexOf('iPad') != -1)) {
+    return Promise.resolve();
+  }
+
   var onUpgrade = function(rawDb) {
     return new Promise(function(resolve, reject) {
       try {
